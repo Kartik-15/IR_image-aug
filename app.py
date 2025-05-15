@@ -1,76 +1,93 @@
 
-import streamlit as st
 import cv2
 import numpy as np
-import io
-import zipfile
 import os
-from PIL import Image
+import random
 
-st.set_page_config(page_title="Image Augmentation Tool", layout="wide")
-st.title("📸 Image Augmentation Tool")
-st.caption("Generate synthetic image data with specific tints and brightness levels.")
+# === Settings ===
+input_dir = r"C:\Users\ksing\Downloads\input_images"  # Update as needed
+output_dir = r"C:\Users\ksing\Downloads\output_images"
+os.makedirs(output_dir, exist_ok=True)
 
-uploaded_files = st.file_uploader("Upload images (jpg/jpeg)", type=["jpg", "jpeg"], accept_multiple_files=True)
-
-# Define tints (BGR format)
+# === Tint variations (BGR format for OpenCV)
 tints = {
     "warm": (0, 30, 80),
     "cool": (80, 30, 0),
-    "daylight": (255, 255, 240),
-    "cool_white": (220, 255, 255),     # cool white
-    "warm_white": (255, 240, 200),     # warm aisle
 }
 
-# Define brightness levels
+# === Brightness levels
 brightness_factors = {
-    "dark":0.8,
     "normal": 1.2,
     "bright": 1.4
 }
 
 alpha = 0.25  # Tint blending strength
 
-def apply_transformations(image, base_name):
-    augmented_images = []
+def apply_shadow(image):
+    h, w = image.shape[:2]
+    mask = np.zeros((h, w), dtype=np.uint8)
+    shadow_polygon = np.array([[0, h], [w, h], [w, int(0.6*h)], [0, int(0.7*h)]], dtype=np.int32)
+    cv2.fillPoly(mask, [shadow_polygon], 100)
+    shadow = cv2.merge([mask]*3)
+    return cv2.addWeighted(image, 1, shadow, 0.4, 0)
 
-    for brightness_label, brightness in brightness_factors.items():
-        # Apply brightness
-        bright_image = np.clip(image * brightness, 0, 255).astype(np.uint8)
+def apply_reflection(image):
+    overlay = image.copy()
+    h, w = image.shape[:2]
+    for i in range(0, h, 4):
+        cv2.line(overlay, (0, i), (w, i), (255, 255, 255), 1)
+    return cv2.addWeighted(image, 0.9, overlay, 0.1, 0)
 
-        for tint_label, tint_color in tints.items():
-            # Apply tint using blending
-            tint_layer = np.full_like(bright_image, tint_color, dtype=np.uint8)
-            final_image = cv2.addWeighted(bright_image, 1 - alpha, tint_layer, alpha, 0)
+def apply_gaussian_blur(image):
+    return cv2.GaussianBlur(image, (5, 5), 0)
 
-            output_filename = f"{base_name}_{brightness_label}_{tint_label}.jpg"
-            _, buffer = cv2.imencode('.jpg', cv2.cvtColor(final_image, cv2.COLOR_RGB2BGR))
-            augmented_images.append((output_filename, buffer.tobytes()))
+def apply_random_occlusion(image):
+    h, w = image.shape[:2]
+    x1, y1 = random.randint(0, w//2), random.randint(0, h//2)
+    x2, y2 = random.randint(x1+20, w), random.randint(y1+20, h)
+    color = [random.randint(0, 255) for _ in range(3)]
+    cv2.rectangle(image, (x1, y1), (x2, y2), color, -1)
+    return image
 
-    return augmented_images
+def apply_perspective_transform(image):
+    h, w = image.shape[:2]
+    pts1 = np.float32([[0,0], [w,0], [0,h], [w,h]])
+    pts2 = np.float32([[random.randint(0,10),random.randint(0,10)],
+                       [w-random.randint(0,10),random.randint(0,10)],
+                       [random.randint(0,10),h-random.randint(0,10)],
+                       [w-random.randint(0,10),h-random.randint(0,10)]])
+    matrix = cv2.getPerspectiveTransform(pts1, pts2)
+    return cv2.warpPerspective(image, matrix, (w, h))
 
-if uploaded_files:
-    st.success("Images uploaded! Generating augmented versions...")
+# === Process images
+for filename in os.listdir(input_dir):
+    if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+        image_path = os.path.join(input_dir, filename)
+        image = cv2.imread(image_path)
 
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
-        for file in uploaded_files:
-            file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
-            image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-            if image is None:
-                continue
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            base_name = os.path.splitext(file.name)[0]
-            augmented = apply_transformations(image, base_name)
-            for filename, file_bytes in augmented:
-                zip_file.writestr(filename, file_bytes)
+        if image is None:
+            print(f"Failed to load image: {filename}")
+            continue
 
-    zip_buffer.seek(0)
-    st.success("✅ Augmentation complete!")
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        base_name = os.path.splitext(filename)[0]
 
-    st.download_button(
-        label="📦 Download All Augmented Images (ZIP)",
-        data=zip_buffer,
-        file_name="augmented_images.zip",
-        mime="application/zip"
-    )
+        for brightness_label, brightness in brightness_factors.items():
+            bright_image = np.clip(image * brightness, 0, 255).astype(np.uint8)
+
+            for tint_label, tint_color in tints.items():
+                tint_layer = np.full_like(bright_image, tint_color, dtype=np.uint8)
+                final_image = cv2.addWeighted(bright_image, 1 - alpha, tint_layer, alpha, 0)
+
+                aug_image = final_image.copy()
+                aug_image = apply_shadow(aug_image)
+                aug_image = apply_reflection(aug_image)
+                aug_image = apply_gaussian_blur(aug_image)
+                aug_image = apply_random_occlusion(aug_image)
+                aug_image = apply_perspective_transform(aug_image)
+
+                output_filename = f"{base_name}_{brightness_label}_{tint_label}_aug.jpg"
+                output_path = os.path.join(output_dir, output_filename)
+                cv2.imwrite(output_path, cv2.cvtColor(aug_image, cv2.COLOR_RGB2BGR))
+
+print(f"All augmented images saved to '{output_dir}' ✅")
