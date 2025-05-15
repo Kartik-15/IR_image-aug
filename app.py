@@ -7,7 +7,7 @@ import shutil
 import tempfile
 from io import BytesIO
 
-# === Utility functions ===
+# === Utility Functions ===
 
 def apply_tint(image, color, alpha=0.25):
     tint_layer = np.full_like(image, color, dtype=np.uint8)
@@ -25,14 +25,11 @@ def apply_shadow(image):
 def apply_glass_reflection(image):
     overlay = np.zeros_like(image, dtype=np.uint8)
     h, w, _ = image.shape
-
     for i in range(0, w, w // 20):
         intensity = np.random.randint(50, 100)
         thickness = np.random.randint(1, 3)
         cv2.line(overlay, (i, 0), (i - h // 2, h), (intensity, intensity, intensity), thickness)
-
-    alpha = 0.15
-    return cv2.addWeighted(image, 1.0, overlay, alpha, 0)
+    return cv2.addWeighted(image, 1.0, overlay, 0.15, 0)
 
 def apply_gaussian_blur(image):
     return cv2.GaussianBlur(image, (7, 7), 0)
@@ -54,30 +51,14 @@ def apply_perspective_transform(image):
     matrix = cv2.getPerspectiveTransform(pts1, pts2)
     return cv2.warpPerspective(image, matrix, (w, h))
 
-def augment_image(image, base_name, output_dir, tints, brightness_factors, selected_augmentations):
-    for brightness_label, brightness in brightness_factors.items():
-        bright_img = np.clip(image * brightness, 0, 255).astype(np.uint8)
-        for tint_label, tint in tints.items():
-            tinted = apply_tint(bright_img, tint)
-            if "Shadow" in selected_augmentations:
-                save_augmented(tinted, apply_shadow, base_name, brightness_label, tint_label, "shadow", output_dir)
-            if "Reflection" in selected_augmentations:
-                save_augmented(tinted, apply_glass_reflection, base_name, brightness_label, tint_label, "reflection", output_dir)
-            if "Blur" in selected_augmentations:
-                save_augmented(tinted, apply_gaussian_blur, base_name, brightness_label, tint_label, "blur", output_dir)
-            if "Occlusion" in selected_augmentations:
-                save_augmented(tinted, apply_random_occlusion, base_name, brightness_label, tint_label, "occlusion", output_dir)
-            if "Perspective" in selected_augmentations:
-                save_augmented(tinted, apply_perspective_transform, base_name, brightness_label, tint_label, "perspective", output_dir)
-
-def save_augmented(image, func, base_name, brightness_label, tint_label, aug_label, output_dir):
+def save_augmented(image, func, base_name, suffix, output_dir):
     try:
         aug_img = func(image)
-        filename = f"{base_name}_{brightness_label}_{tint_label}_{aug_label}.jpg"
+        filename = f"{base_name}_{suffix}.jpg"
         save_path = os.path.join(output_dir, filename)
         cv2.imwrite(save_path, cv2.cvtColor(aug_img, cv2.COLOR_RGB2BGR))
     except Exception as e:
-        print(f"Skipping {aug_label} for {base_name} due to error: {e}")
+        print(f"Skipping {suffix} for {base_name} due to error: {e}")
 
 # === Streamlit UI ===
 
@@ -87,25 +68,33 @@ uploaded_files = st.file_uploader("Upload images or a ZIP file", accept_multiple
 
 st.sidebar.header("Augmentation Settings")
 
-selected_augmentations = st.sidebar.multiselect(
-    "Choose Augmentations to Apply",
-    ["Shadow", "Reflection", "Blur", "Occlusion", "Perspective"],
-    default=["Shadow", "Reflection"]
+augmentations = st.sidebar.multiselect(
+    "Choose Augmentations",
+    ["Shadow", "Reflection", "Blur", "Occlusion", "Perspective"]
 )
 
-brightness_factors_all = {
+brightness_options = st.sidebar.multiselect(
+    "Brightness Levels",
+    ["dark", "normal", "bright"],
+    default=[]
+)
+
+tint_options = st.sidebar.multiselect(
+    "Tints",
+    [
+        "warm", "cool", "cool_white", "warm_white",
+        "fluorescent_green", "bluish_white", "soft_pink", "daylight"
+    ],
+    default=[]
+)
+
+brightness_factors = {
     "dark": 0.8,
     "normal": 1.2,
     "bright": 1.4
 }
 
-brightness_option = st.sidebar.multiselect(
-    "Brightness Level",
-    list(brightness_factors_all.keys()),
-    default=["normal"]
-)
-
-tints_all = {
+tint_colors = {
     "warm": (0, 30, 80),
     "cool": (80, 30, 0),
     "cool_white": (220, 255, 255),
@@ -116,54 +105,70 @@ tints_all = {
     "daylight": (255, 255, 240)
 }
 
-tint_option = st.sidebar.multiselect(
-    "Tint",
-    list(tints_all.keys()),
-    default=["warm_white"]
-)
-
 if uploaded_files:
-    with tempfile.TemporaryDirectory() as input_dir, tempfile.TemporaryDirectory() as output_dir:
-        for file in uploaded_files:
-            if file.name.endswith(".zip"):
-                with zipfile.ZipFile(file, 'r') as zip_ref:
-                    zip_ref.extractall(input_dir)
-            else:
-                with open(os.path.join(input_dir, file.name), "wb") as f:
-                    f.write(file.read())
+    if not (augmentations or brightness_options or tint_options):
+        st.error("⚠️ Please select at least one option from Brightness, Tint, or Augmentations.")
+    else:
+        with tempfile.TemporaryDirectory() as input_dir, tempfile.TemporaryDirectory() as output_dir:
+            for file in uploaded_files:
+                if file.name.endswith(".zip"):
+                    with zipfile.ZipFile(file, 'r') as zip_ref:
+                        zip_ref.extractall(input_dir)
+                else:
+                    with open(os.path.join(input_dir, file.name), "wb") as f:
+                        f.write(file.read())
 
-        st.info("Processing images with selected augmentations...")
+            st.info("🔄 Processing images...")
 
-        selected_tints = {k: tints_all[k] for k in tint_option}
-        selected_brightness = {k: brightness_factors_all[k] for k in brightness_option}
+            for filename in os.listdir(input_dir):
+                if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    path = os.path.join(input_dir, filename)
+                    img = cv2.imread(path)
+                    if img is None:
+                        continue
 
-        for filename in os.listdir(input_dir):
-            if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-                path = os.path.join(input_dir, filename)
-                img = cv2.imread(path)
-                if img is not None:
-                    try:
-                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                        base_name = os.path.splitext(filename)[0]
-                        augment_image(
-                            img,
-                            base_name,
-                            output_dir,
-                            selected_tints,
-                            selected_brightness,
-                            selected_augmentations
-                        )
-                    except Exception as e:
-                        st.warning(f"Skipping {filename} due to error: {e}")
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    base_name = os.path.splitext(filename)[0]
 
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w") as zipf:
-            for root, _, files in os.walk(output_dir):
-                for file in files:
-                    full_path = os.path.join(root, file)
-                    arcname = os.path.relpath(full_path, output_dir)
-                    zipf.write(full_path, arcname)
-        zip_buffer.seek(0)
+                    # Handle all combinations
+                    bright_levels = brightness_options if brightness_options else ["original"]
+                    tint_levels = tint_options if tint_options else ["original"]
 
-        st.success("🎉 Augmentation complete!")
-        st.download_button("Download Augmented Images (.zip)", zip_buffer, file_name="augmented_images.zip")
+                    for b in bright_levels:
+                        bright_img = img if b == "original" else np.clip(img * brightness_factors[b], 0, 255).astype(np.uint8)
+                        for t in tint_levels:
+                            final_img = bright_img if t == "original" else apply_tint(bright_img, tint_colors[t])
+
+                            suffix_base = ""
+                            if b != "original":
+                                suffix_base += b
+                            if t != "original":
+                                suffix_base += f"_{t}"
+
+                            if augmentations:
+                                for aug in augmentations:
+                                    suffix = f"{suffix_base}_{aug}" if suffix_base else aug
+                                    func = {
+                                        "Shadow": apply_shadow,
+                                        "Reflection": apply_glass_reflection,
+                                        "Blur": apply_gaussian_blur,
+                                        "Occlusion": apply_random_occlusion,
+                                        "Perspective": apply_perspective_transform
+                                    }.get(aug)
+                                    save_augmented(final_img, func, base_name, suffix, output_dir)
+                            else:
+                                suffix = suffix_base if suffix_base else "original"
+                                save_path = os.path.join(output_dir, f"{base_name}_{suffix}.jpg")
+                                cv2.imwrite(save_path, cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR))
+
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zipf:
+                for root, _, files in os.walk(output_dir):
+                    for file in files:
+                        full_path = os.path.join(root, file)
+                        arcname = os.path.relpath(full_path, output_dir)
+                        zipf.write(full_path, arcname)
+            zip_buffer.seek(0)
+
+            st.success("✅ Augmentation complete!")
+            st.download_button("Download Augmented Images (.zip)", zip_buffer, file_name="augmented_images.zip")
