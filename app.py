@@ -93,13 +93,13 @@ selected_augmentations = st.sidebar.multiselect(
     default=["Shadow", "Reflection"]
 )
 
-brightness_option = st.sidebar.selectbox("Brightness Level", ["normal", "bright"])
+brightness_option = st.sidebar.multiselect("Brightness Level", ["normal", "bright"])
 brightness_factors = {
     "normal": 1.2,
     "bright": 1.4
 }
 
-tint_option = st.sidebar.selectbox("Tint", ["warm", "cool"])
+tint_option = st.sidebar.multiselect("Tint", ["warm", "cool"])
 tints = {
     "warm": (0, 30, 80),
     "cool": (80, 30, 0)
