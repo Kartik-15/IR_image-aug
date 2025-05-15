@@ -88,31 +88,39 @@ uploaded_files = st.file_uploader("Upload images or a ZIP file", accept_multiple
 st.sidebar.header("Augmentation Settings")
 
 selected_augmentations = st.sidebar.multiselect(
-    "Choose Augmentations to Apply:",
+    "Choose Augmentations to Apply",
     ["Shadow", "Reflection", "Blur", "Occlusion", "Perspective"],
     default=["Shadow", "Reflection"]
 )
 
-brightness_option = st.sidebar.multiselect("Brightness Level", ["normal", "bright"])
 brightness_factors = {
     "dark": 0.8,
     "normal": 1.2,
-    "bright": 1.4,
-    default=["normal"]
+    "bright": 1.4
 }
 
-tint_option = st.sidebar.multiselect("Tint", ["warm", "cool"])
+brightness_option = st.sidebar.multiselect(
+    "Brightness Level",
+    ["dark", "normal", "bright"],
+    default=["normal"]
+)
+
 tints = {
     "warm": (0, 30, 80),
     "cool": (80, 30, 0),
-    'cool_white': (220, 255, 255),     # cool white
-    'warm_white': (255, 240, 200),     # warm aisle
+    'cool_white': (220, 255, 255),      # cool white
+    'warm_white': (255, 240, 200),      # warm aisle
     'fluorescent_green': (220, 255, 220),
     'bluish_white': (200, 220, 255),
     'soft_pink': (255, 220, 230),
-    'daylight': (255, 255, 240),
-    default=["warm_white"]
+    'daylight': (255, 255, 240)
 }
+
+tint_option = st.sidebar.multiselect(
+    "Tint",
+    list(tints.keys()),
+    default=["warm_white"]
+)
 
 if uploaded_files:
     with tempfile.TemporaryDirectory() as input_dir, tempfile.TemporaryDirectory() as output_dir:
