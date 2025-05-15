@@ -17,10 +17,14 @@ uploaded_files = st.file_uploader("Upload images (jpg/jpeg/png)", type=["jpg", "
 tints = {
     "warm": (0, 30, 80),
     "cool": (80, 30, 0),
+    "daylight": (255, 255, 240),
+    "cool_white": (220, 255, 255),     # cool white
+    "warm_white": (255, 240, 200),     # warm aisle
 }
 
 # Define brightness levels
 brightness_factors = {
+    "dark":0.8,
     "normal": 1.2,
     "bright": 1.4
 }
