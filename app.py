@@ -93,7 +93,7 @@ selected_augmentations = st.sidebar.multiselect(
     default=["Shadow", "Reflection"]
 )
 
-brightness_factors = {
+brightness_factors_all = {
     "dark": 0.8,
     "normal": 1.2,
     "bright": 1.4
@@ -101,24 +101,24 @@ brightness_factors = {
 
 brightness_option = st.sidebar.multiselect(
     "Brightness Level",
-    ["dark", "normal", "bright"],
+    list(brightness_factors_all.keys()),
     default=["normal"]
 )
 
-tints = {
+tints_all = {
     "warm": (0, 30, 80),
     "cool": (80, 30, 0),
-    'cool_white': (220, 255, 255),      # cool white
-    'warm_white': (255, 240, 200),      # warm aisle
-    'fluorescent_green': (220, 255, 220),
-    'bluish_white': (200, 220, 255),
-    'soft_pink': (255, 220, 230),
-    'daylight': (255, 255, 240)
+    "cool_white": (220, 255, 255),
+    "warm_white": (255, 240, 200),
+    "fluorescent_green": (220, 255, 220),
+    "bluish_white": (200, 220, 255),
+    "soft_pink": (255, 220, 230),
+    "daylight": (255, 255, 240)
 }
 
 tint_option = st.sidebar.multiselect(
     "Tint",
-    list(tints.keys()),
+    list(tints_all.keys()),
     default=["warm_white"]
 )
 
@@ -134,6 +134,9 @@ if uploaded_files:
 
         st.info("Processing images with selected augmentations...")
 
+        selected_tints = {k: tints_all[k] for k in tint_option}
+        selected_brightness = {k: brightness_factors_all[k] for k in brightness_option}
+
         for filename in os.listdir(input_dir):
             if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
                 path = os.path.join(input_dir, filename)
@@ -146,8 +149,8 @@ if uploaded_files:
                             img,
                             base_name,
                             output_dir,
-                            {tint_option: tints[tint_option]},
-                            {brightness_option: brightness_factors[brightness_option]},
+                            selected_tints,
+                            selected_brightness,
                             selected_augmentations
                         )
                     except Exception as e:
