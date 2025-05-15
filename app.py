@@ -22,11 +22,18 @@ def apply_shadow(image):
     alpha = np.random.uniform(0.3, 0.7)
     return cv2.addWeighted(image, 1, shadow, alpha, 0)
 
-def apply_reflection(image):
-    flipped = cv2.flip(image, 0)
-    mask = np.linspace(1, 0, image.shape[0])[:, None]
-    reflection = (flipped * mask).astype(np.uint8)
-    return np.vstack((image, reflection))
+def apply_glass_reflection(image):
+    overlay = np.zeros_like(image, dtype=np.uint8)
+    h, w, _ = image.shape
+
+    for i in range(0, w, w // 20):
+        intensity = np.random.randint(50, 100)
+        thickness = np.random.randint(1, 3)
+        cv2.line(overlay, (i, 0), (i - h // 2, h), (intensity, intensity, intensity), thickness)
+
+    alpha = 0.15
+    reflected = cv2.addWeighted(image, 1.0, overlay, alpha, 0)
+    return reflected
 
 def apply_gaussian_blur(image):
     return cv2.GaussianBlur(image, (7, 7), 0)
@@ -55,15 +62,18 @@ def augment_image(image, base_name, output_dir, tints, brightness_factors):
             tinted = apply_tint(bright_img, tint)
             variants = {
                 "shadow": apply_shadow(tinted),
-                "reflection": apply_reflection(tinted),
+                "reflection": apply_glass_reflection(tinted),
                 "blur": apply_gaussian_blur(tinted),
                 "occlusion": apply_random_occlusion(tinted),
                 "perspective": apply_perspective_transform(tinted),
             }
             for aug_label, aug_image in variants.items():
-                filename = f"{base_name}_{brightness_label}_{tint_label}_{aug_label}.jpg"
-                save_path = os.path.join(output_dir, filename)
-                cv2.imwrite(save_path, cv2.cvtColor(aug_image, cv2.COLOR_RGB2BGR))
+                try:
+                    filename = f"{base_name}_{brightness_label}_{tint_label}_{aug_label}.jpg"
+                    save_path = os.path.join(output_dir, filename)
+                    cv2.imwrite(save_path, cv2.cvtColor(aug_image, cv2.COLOR_RGB2BGR))
+                except Exception as e:
+                    print(f"Skipping {aug_label} for {base_name} due to error: {e}")
 
 # === Streamlit UI ===
 
@@ -97,9 +107,12 @@ if uploaded_files:
                 path = os.path.join(input_dir, filename)
                 img = cv2.imread(path)
                 if img is not None:
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    base_name = os.path.splitext(filename)[0]
-                    augment_image(img, base_name, output_dir, tints, brightness_factors)
+                    try:
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        base_name = os.path.splitext(filename)[0]
+                        augment_image(img, base_name, output_dir, tints, brightness_factors)
+                    except Exception as e:
+                        st.warning(f"Skipping {filename} due to error: {e}")
 
         # Create ZIP of output
         zip_buffer = BytesIO()
