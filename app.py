@@ -11,7 +11,7 @@ st.set_page_config(page_title="Image Augmentation Tool", layout="wide")
 st.title("📸 Image Augmentation Tool")
 st.caption("Generate synthetic image data with specific tints and brightness levels.")
 
-uploaded_files = st.file_uploader("Upload images (jpg/jpeg/png)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload images (jpg/jpeg)", type=["jpg", "jpeg"], accept_multiple_files=True)
 
 # Define tints (BGR format)
 tints = {
