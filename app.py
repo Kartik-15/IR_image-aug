@@ -95,14 +95,23 @@ selected_augmentations = st.sidebar.multiselect(
 
 brightness_option = st.sidebar.multiselect("Brightness Level", ["normal", "bright"])
 brightness_factors = {
+    "dark": 0.8,
     "normal": 1.2,
-    "bright": 1.4
+    "bright": 1.4,
+    default=["normal"]
 }
 
 tint_option = st.sidebar.multiselect("Tint", ["warm", "cool"])
 tints = {
     "warm": (0, 30, 80),
-    "cool": (80, 30, 0)
+    "cool": (80, 30, 0),
+    'cool_white': (220, 255, 255),     # cool white
+    'warm_white': (255, 240, 200),     # warm aisle
+    'fluorescent_green': (220, 255, 220),
+    'bluish_white': (200, 220, 255),
+    'soft_pink': (255, 220, 230),
+    'daylight': (255, 255, 240),
+    default=["warm_white"]
 }
 
 if uploaded_files:
