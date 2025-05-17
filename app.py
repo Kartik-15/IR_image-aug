@@ -79,7 +79,7 @@ if overlay_paths:
     for label, path in zip(overlay_labels, overlay_paths):
         col1, col2 = st.sidebar.columns([1,4])
         with col1:
-            st.image(path, use_column_width=True)
+            st.image(path, use_container_width=True)
         with col2:
             if st.checkbox(label, key=f"ov_{label}"):
                 selections.append((label, path))
