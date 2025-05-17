@@ -60,6 +60,36 @@ tint_colors = {
     "daylight": (255, 255, 240)
 }
 
+# ---------------------------------------
+#  SECTION: built-in overlay gallery
+# ---------------------------------------
+import glob
+
+OVERLAY_DIR = "overlays"  # folder in your repo
+overlay_paths = sorted(glob.glob(os.path.join(OVERLAY_DIR, "*.*")))
+
+if overlay_paths:
+    st.sidebar.subheader("📸 Built-in Glass Overlays")
+
+    # Friendly names for the check-boxes
+    overlay_labels = [os.path.splitext(os.path.basename(p))[0] for p in overlay_paths]
+
+    # Show thumbnails in a single column
+    selections = []
+    for label, path in zip(overlay_labels, overlay_paths):
+        col1, col2 = st.sidebar.columns([1,4])
+        with col1:
+            st.image(path, use_column_width=True)
+        with col2:
+            if st.checkbox(label, key=f"ov_{label}"):
+                selections.append((label, path))
+
+    # Convert selected overlay files into images for later blending
+    for label, path in selections:
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if img is not None:
+            overlay_images.append((label, img))
+
 if uploaded_files:
     if not (augmentations or brightness_options or tint_options or overlay_files):
         st.error("⚠️ Please select at least one option from Brightness, Tint, Augmentations or Overlay.")
