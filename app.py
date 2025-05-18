@@ -71,23 +71,25 @@ st.markdown("---")
 st.header("🔍 Live Preview (Sample Image)")
 
 sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
-sample_choice = None
+selected_sample = None
 if sample_files:
-    preview_imgs = {}
-    for path in sample_files:
-        name = os.path.basename(path)
-        preview_imgs[name] = cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
+    sample_labels = [os.path.basename(f) for f in sample_files]
+    selected_label = st.sidebar.selectbox("Select a Sample Image", sample_labels)
+    selected_sample = os.path.join("Sample", selected_label)
+    preview_img = cv2.cvtColor(cv2.imread(selected_sample), cv2.COLOR_BGR2RGB)
+    st.sidebar.image(preview_img, caption="Preview", use_container_width=True)
 
-    st.sidebar.subheader("🔧 Preview Controls")
-    sample_choice = st.sidebar.selectbox("Select Sample Image", list(preview_imgs.keys()))
-    st.sidebar.image(preview_imgs[sample_choice], caption="Preview", use_container_width=True)
+    img_prev = preview_img.copy()
 
-    tint_preview = st.sidebar.slider("Tint Opacity", 0.0, 1.0, 0.25, step=0.05)
-    shadow_strength = st.sidebar.slider("Shadow Strength", 0.0, 1.0, 0.45, step=0.05)
-    reflection_intensity = st.sidebar.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
-    blur_strength = st.sidebar.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
+    # Columns for image and sliders
+    img_col, slider_col = st.columns([2, 1])
+    with slider_col:
+        st.markdown("#### 🔧 Preview Controls")
+        tint_preview = st.slider("Tint Opacity", 0.0, 1.0, 0.25, step=0.05)
+        shadow_strength = st.slider("Shadow Strength", 0.0, 1.0, 0.45, step=0.05)
+        reflection_intensity = st.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
+        blur_strength = st.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
 
-    img_prev = preview_imgs[sample_choice].copy()
     if tint_opts:
         img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
     if "Shadow" in augmentations:
@@ -97,28 +99,30 @@ if sample_files:
     if "Blur" in augmentations:
         img_prev = apply_gaussian_blur(img_prev, blur_strength)
 
-    overlay_imgs=[]
-    OV_DIR="overlays"
-    for p in glob.glob(f"{OV_DIR}/*.*"):
-        lbl=os.path.splitext(os.path.basename(p))[0]
-        col1,col2=st.sidebar.columns([1,4])
-        with col1: st.image(p,use_container_width=True)
-        with col2:
-            if st.checkbox(lbl,key=f"ov_{lbl}"):
-                img=cv2.imread(p,cv2.IMREAD_UNCHANGED); overlay_imgs.append((lbl,img))
-                img_prev = apply_overlay(img_prev, img)
+    with img_col:
+        st.image(img_prev, caption="Live Preview", use_container_width=True)
 
-    for f in ov_uploads:
-        f.seek(0)
-        data = np.frombuffer(f.read(), np.uint8)
-        img = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
-        if img is not None:
-            overlay_imgs.append((os.path.splitext(f.name)[0], img))
-            img_prev = apply_overlay(img_prev, img)
-
-    st.image(img_prev, caption="Live Preview", use_container_width=False, width=400)
 else:
     st.warning("No sample image found in the 'Sample' folder. Please add at least one .jpg file.")
+
+# ──────────────────────────────────
+# Overlay images
+# ──────────────────────────────────
+overlay_imgs=[]
+OV_DIR="overlays"
+for p in glob.glob(f"{OV_DIR}/*.*"):
+    lbl=os.path.splitext(os.path.basename(p))[0]
+    col1,col2=st.sidebar.columns([1,4])
+    with col1: st.image(p,use_container_width=True)
+    with col2:
+        if st.checkbox(lbl,key=f"ov_{lbl}"):
+            img=cv2.imread(p,cv2.IMREAD_UNCHANGED); overlay_imgs.append((lbl,img))
+
+for f in ov_uploads:
+    data=np.frombuffer(f.read(),np.uint8)
+    if data.size == 0: continue
+    img=cv2.imdecode(data,cv2.IMREAD_UNCHANGED)
+    overlay_imgs.append((os.path.splitext(f.name)[0],img))
 
 # ──────────────────────────────────
 # PROCESS
@@ -167,15 +171,17 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                                 cv2.imwrite(path,cv2.cvtColor(img_bto,cv2.COLOR_RGB2BGR))
                                 output_files.append(path)
 
-            st.success(f"✅ Done — {len(output_files)} images generated.")
+            st.success(f"✅ Done! Total Images Generated: {len(output_files)}")
 
             if len(output_files) < 5:
-                for path in output_files:
+                img_cols = st.columns(len(output_files))
+                for i, path in enumerate(output_files):
                     fname = os.path.basename(path)
-                    with open(path, "rb") as f:
-                        img_bytes = f.read()
-                        st.image(img_bytes, caption=fname, use_container_width=True)
-                        st.download_button("Download "+fname, img_bytes, file_name=fname)
+                    with img_cols[i]:
+                        with open(path, "rb") as f:
+                            img_bytes = f.read()
+                            st.image(img_bytes, width=160)
+                            st.download_button("Download", img_bytes, file_name=fname)
             else:
                 buf=BytesIO()
                 with zipfile.ZipFile(buf,"w") as z:
