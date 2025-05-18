@@ -109,13 +109,14 @@ if sample_files:
         shadow_strength = st.slider("Shadow Strength", 0.0, 1.0, 0.45, step=0.05)
         reflection_intensity = st.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
         blur_strength = st.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
+        overlay_strength = st.slider("Overlay Strength", 0.0, 1.0, 0.3, step=0.05)
 
     # Apply preview effects including overlays to img_prev
     if tint_opts:
         img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
     if overlay_imgs:
         ov_img = overlay_imgs[0][1]
-        img_prev = apply_overlay(img_prev, ov_img)
+        img_prev = apply_overlay(img_prev, ov_img, overlay_strength)
     if "Shadow" in augmentations:
         img_prev = apply_shadow(img_prev, shadow_strength)
     if "Reflection" in augmentations:
@@ -155,7 +156,7 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                     for t in (tint_opts or ["original"]):
                         img_bt = img_b if t=="original" else apply_tint(img_b, tint_vals[t])
                         for ov_name, ov_img in (overlay_imgs or [("orig", None)]):
-                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img)
+                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img, overlay_strength)
 
                             suffix = "_".join([s for s in [b,t] if s!="original"])
                             if ov_img is not None:
