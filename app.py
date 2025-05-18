@@ -102,21 +102,33 @@ if sample_files:
 
     img_prev = preview_img.copy()
 
-    img_col, slider_col = st.columns([2, 1])
+    img_col, spacer_col, slider_col = st.columns([2, 0.1, 1])
     with slider_col:
         st.markdown("#### 🔧 Preview Controls")
-        tint_preview = st.slider("Tint Opacity", 0.0, 1.0, 0.25, step=0.05)
         shadow_strength = st.slider("Shadow Strength", 0.0, 1.0, 0.45, step=0.05)
         reflection_intensity = st.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
         blur_strength = st.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
-        overlay_strength = st.slider("Overlay Strength", 0.0, 1.0, 0.3, step=0.05)
 
-    # Apply preview effects including overlays to img_prev
-    if tint_opts:
-        img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
-    if overlay_imgs:
-        ov_img = overlay_imgs[0][1]
-        img_prev = apply_overlay(img_prev, ov_img, overlay_strength)
+        # Tint controls
+        enabled_tints = []
+        for tint in tint_opts:
+            enable = st.checkbox(f"Enable {tint}", value=True, key=f"tint_en_{tint}")
+            if enable:
+                opacity = st.slider(f"{tint} Opacity", 0.0, 1.0, 0.25, step=0.05, key=f"tint_op_{tint}")
+                enabled_tints.append((tint, opacity))
+
+        # Overlay controls
+        enabled_overlays = []
+        for name, img in overlay_imgs:
+            enable = st.checkbox(f"Enable Overlay: {name}", value=True, key=f"ov_en_{name}")
+            if enable:
+                ov_alpha = st.slider(f"{name} Opacity", 0.0, 1.0, 0.3, step=0.05, key=f"ov_op_{name}")
+                enabled_overlays.append((img, ov_alpha))
+
+    for tint, alpha in enabled_tints:
+        img_prev = apply_tint(img_prev, tint_vals[tint], alpha)
+    for ov_img, ov_alpha in enabled_overlays:
+        img_prev = apply_overlay(img_prev, ov_img, ov_alpha)
     if "Shadow" in augmentations:
         img_prev = apply_shadow(img_prev, shadow_strength)
     if "Reflection" in augmentations:
@@ -126,7 +138,6 @@ if sample_files:
 
     with img_col:
         st.image(img_prev, caption="Live Preview", use_container_width=True)
-
 else:
     st.warning("No sample image found in the 'Sample' folder. Please add at least one .jpg file.")
 
@@ -156,7 +167,7 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                     for t in (tint_opts or ["original"]):
                         img_bt = img_b if t=="original" else apply_tint(img_b, tint_vals[t])
                         for ov_name, ov_img in (overlay_imgs or [("orig", None)]):
-                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img, overlay_strength)
+                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img)
 
                             suffix = "_".join([s for s in [b,t] if s!="original"])
                             if ov_img is not None:
@@ -180,7 +191,6 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                                 output_files.append(path)
 
             st.success("✅ Done")
-
             st.markdown(f"**Total images created: {len(output_files)}**")
 
             if len(output_files) < 5:
