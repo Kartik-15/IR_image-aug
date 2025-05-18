@@ -65,16 +65,29 @@ tint_vals = {
 }
 
 # ──────────────────────────────────
+# Sidebar Sample Image Selection
+# ──────────────────────────────────
+sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
+selected_sample = None
+
+if sample_files:
+    st.sidebar.subheader("🖼 Select Sample Image")
+    thumbs = []
+    for i, path in enumerate(sample_files):
+        img = cv2.imread(path)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        thumbs.append((os.path.basename(path), img_rgb))
+    
+    selected_filename = st.sidebar.radio("Choose preview image", [f[0] for f in thumbs])
+    selected_sample = next(img for fname, img in thumbs if fname == selected_filename)
+
+# ──────────────────────────────────
 # Live Preview Section
 # ──────────────────────────────────
 st.markdown("---")
 st.header("🔍 Live Preview (Sample Image)")
 
-sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
-if sample_files:
-    sample_path = sample_files[0]
-    preview_img = cv2.cvtColor(cv2.imread(sample_path), cv2.COLOR_BGR2RGB)
-
+if selected_sample is not None:
     st.sidebar.subheader("🔧 Preview Controls")
     preview_col = st.columns(2)
     with preview_col[0]:
@@ -83,7 +96,7 @@ if sample_files:
         reflection_intensity = st.sidebar.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
         blur_strength = st.sidebar.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
 
-    img_prev = preview_img.copy()
+    img_prev = selected_sample.copy()
     if tint_opts:
         img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
     if "Shadow" in augmentations:
@@ -93,7 +106,7 @@ if sample_files:
     if "Blur" in augmentations:
         img_prev = apply_gaussian_blur(img_prev, blur_strength)
 
-    st.image(img_prev, caption="Live Preview", use_container_width=True)
+    st.image(img_prev, caption="Live Preview", width=400, use_container_width=False)
 else:
     st.warning("No sample image found in the 'Sample' folder. Please add at least one .jpg file.")
 
