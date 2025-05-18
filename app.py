@@ -12,27 +12,24 @@ def apply_shadow(img, strength=0.45):
     h, w = img.shape[:2]
     mask = np.zeros_like(img)
     cv2.rectangle(mask, (int(w*0.3),0), (w,int(h*0.7)), (0,0,0), -1)
-    return cv2.addWeighted(img, 1, mask, strength, 0)
+    return cv2.addWeighted(img,1, mask,strength,0)
 
-def apply_glass_reflection(img, intensity=0.12):
+def apply_glass_reflection(img, strength=0.12):
     over = np.zeros_like(img)
     h,w = img.shape[:2]
     for x in range(0,w,w//20):
         cv2.line(over,(x,0),(x-h//2,h),(255,255,255),1)
     over = cv2.GaussianBlur(over,(0,0),5)
-    return cv2.addWeighted(img, 1, over, intensity, 0)
+    return cv2.addWeighted(img,1,over,strength,0)
 
-def apply_gaussian_blur(img, k=7):
-    k = k if k % 2 == 1 else k+1
-    return cv2.GaussianBlur(img, (k,k), 0)
-
+def apply_gaussian_blur(img):      return cv2.GaussianBlur(img,(7,7),0)
 def apply_random_occlusion(img):   return img  # stub
 def apply_perspective_transform(i):return i    # stub
 
 def apply_overlay(base, overlay, alpha=0.3):
     ov = cv2.resize(overlay,(base.shape[1],base.shape[0]))
-    if ov.shape[2]==4: ov = cv2.cvtColor(ov,cv2.COLOR_BGRA2BGR)
-    if base.shape[2]==4: base = cv2.cvtColor(base,cv2.COLOR_BGRA2BGR)
+    if ov.shape[2]==4: ov = cv2.cvtColor(ov, cv2.COLOR_BGRA2BGR)
+    if base.shape[2]==4: base = cv2.cvtColor(base, cv2.COLOR_BGRA2BGR)
     return cv2.addWeighted(base,1, ov,alpha,0)
 
 def save_aug(img, func, name, suf, out_dir):
@@ -50,12 +47,11 @@ up_files   = st.file_uploader("Upload images / zip", accept_multiple_files=True)
 ov_uploads = st.sidebar.file_uploader("Upload Overlay(s)", type=["png","jpg"], accept_multiple_files=True)
 
 st.sidebar.header("Settings")
-augmentations = st.sidebar.multiselect("Augmentations",
-    ["Shadow","Reflection","Blur","Occlusion","Perspective"])
+augmentations = st.sidebar.multiselect("Augmentations", ["Shadow","Reflection","Blur","Occlusion","Perspective"])
 brightness_opts = st.sidebar.multiselect("Brightness", ["dark","normal","bright"])
-tint_opts = st.sidebar.multiselect("Tints",
-    ["warm","cool","cool_white","warm_white","fluorescent_green",
-     "bluish_white","soft_pink","daylight"])
+tint_opts = st.sidebar.multiselect("Tints", [
+    "warm","cool","cool_white","warm_white","fluorescent_green",
+    "bluish_white","soft_pink","daylight"])
 
 brightness_vals = {"dark":0.8, "normal":1.2, "bright":1.4}
 tint_vals = {
@@ -64,41 +60,7 @@ tint_vals = {
     "bluish_white":(200,220,255),"soft_pink":(255,220,230),"daylight":(255,255,240)
 }
 
-# ──────────────────────────────────
-# Live Preview Section
-# ──────────────────────────────────
-st.markdown("---")
-st.header("🔍 Live Preview (Sample Image)")
-
-sample_path = os.path.join("Sample", "sample.jpg")
-if os.path.exists(sample_path):
-    preview_img = cv2.cvtColor(cv2.imread(sample_path), cv2.COLOR_BGR2RGB)
-
-    st.sidebar.subheader("🔧 Preview Controls")
-    preview_col = st.columns(2)
-    with preview_col[0]:
-        tint_preview = st.sidebar.slider("Tint Opacity", 0.0, 1.0, 0.25, step=0.05)
-        shadow_strength = st.sidebar.slider("Shadow Strength", 0.0, 1.0, 0.45, step=0.05)
-        reflection_intensity = st.sidebar.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
-        blur_strength = st.sidebar.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
-
-    img_prev = preview_img.copy()
-    if tint_opts:
-        img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
-    if "Shadow" in augmentations:
-        img_prev = apply_shadow(img_prev, shadow_strength)
-    if "Reflection" in augmentations:
-        img_prev = apply_glass_reflection(img_prev, reflection_intensity)
-    if "Blur" in augmentations:
-        img_prev = apply_gaussian_blur(img_prev, blur_strength)
-
-    st.image(img_prev, caption="Live Preview", use_column_width=True)
-else:
-    st.warning("Sample image not found in 'Sample/sample.jpg'. Please add one for preview.")
-
-# ──────────────────────────────────
-# Overlay images
-# ──────────────────────────────────
+# Overlay loading
 overlay_imgs=[]
 OV_DIR="overlays"
 for p in glob.glob(f"{OV_DIR}/*.*"):
@@ -113,6 +75,39 @@ for f in ov_uploads:
     data=np.frombuffer(f.read(),np.uint8)
     img=cv2.imdecode(data,cv2.IMREAD_UNCHANGED)
     overlay_imgs.append((os.path.splitext(f.name)[0],img))
+
+# ──────────────────────────────────
+# Preview with Sample image
+# ──────────────────────────────────
+st.subheader("🔍 Live Preview (Sample Image)")
+
+sample_imgs = sorted(glob.glob("Sample/*.*"))
+sample_col_imgs = [cv2.cvtColor(cv2.imread(p), cv2.COLOR_BGR2RGB) for p in sample_imgs]
+sel_sample = None
+sample_idx = 0
+
+cols = st.columns(len(sample_imgs))
+for i, (col, img, path) in enumerate(zip(cols, sample_col_imgs, sample_imgs)):
+    if col.button(os.path.basename(path), key=f"sample_btn_{i}"):
+        sample_idx = i
+sel_sample = sample_col_imgs[sample_idx]
+st.image(sel_sample, caption=f"Selected Sample: {os.path.basename(sample_imgs[sample_idx])}")
+
+if sel_sample is not None:
+    if "Shadow" in augmentations:
+        shadow_opacity = st.slider("Shadow Strength", 0.0, 1.0, 0.45, 0.05)
+        img_preview = apply_shadow(sel_sample.copy(), strength=shadow_opacity)
+        st.image(img_preview, caption="Shadow Preview")
+
+    if "Reflection" in augmentations:
+        refl_opacity = st.slider("Reflection Strength", 0.0, 1.0, 0.12, 0.01)
+        img_preview = apply_glass_reflection(sel_sample.copy(), strength=refl_opacity)
+        st.image(img_preview, caption="Reflection Preview")
+
+    for name, ov_img in overlay_imgs:
+        ov_opacity = st.slider(f"Overlay '{name}' Opacity", 0.0, 1.0, 0.3, 0.05, key=name)
+        img_preview = apply_overlay(sel_sample.copy(), ov_img, alpha=ov_opacity)
+        st.image(img_preview, caption=f"Overlay '{name}' Preview")
 
 # ──────────────────────────────────
 # PROCESS
@@ -148,10 +143,9 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                             if augmentations:
                                 for aug in augmentations:
                                     func={
-                                        "Shadow":apply_shadow,
-                                        "Reflection":apply_glass_reflection,
-                                        "Blur":apply_gaussian_blur,
-                                        "Occlusion":apply_random_occlusion,
+                                        "Shadow":lambda x: apply_shadow(x, strength=shadow_opacity),
+                                        "Reflection":lambda x: apply_glass_reflection(x, strength=refl_opacity),
+                                        "Blur":apply_gaussian_blur,"Occlusion":apply_random_occlusion,
                                         "Perspective":apply_perspective_transform
                                     }[aug]
                                     path = save_aug(img_bto,func,base,f"{suffix}_{aug.lower()}",out_dir)
