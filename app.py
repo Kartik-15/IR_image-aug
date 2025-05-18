@@ -93,7 +93,7 @@ if sample_files:
     if "Blur" in augmentations:
         img_prev = apply_gaussian_blur(img_prev, blur_strength)
 
-    st.image(img_prev, caption="Live Preview", use_column_width=True)
+    st.image(img_prev, caption="Live Preview", use_container_width=True)
 else:
     st.warning("No sample image found in the 'Sample' folder. Please add at least one .jpg file.")
 
@@ -169,7 +169,7 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                     fname = os.path.basename(path)
                     with open(path, "rb") as f:
                         img_bytes = f.read()
-                        st.image(img_bytes, caption=fname, use_column_width=True)
+                        st.image(img_bytes, caption=fname, use_container_width=True)
                         st.download_button("Download "+fname, img_bytes, file_name=fname)
             else:
                 buf=BytesIO()
