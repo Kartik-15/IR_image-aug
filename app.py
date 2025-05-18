@@ -130,7 +130,7 @@ else:
         img = Image.open(img_path).resize((100, 100))
         if cols[idx].button(image_file, key=f"thumb_{idx}"):
             st.session_state['selected_sample'] = image_file
-        cols[idx].image(img, use_column_width=True)
+        cols[idx].image(img, use_container_width=True)
 
     # Default to first if none selected
     selected_sample = st.session_state.get("selected_sample", sample_images[0])
@@ -151,10 +151,10 @@ else:
     st.markdown(f"#### Previewing: `{selected_sample}`")
     col1, col2 = st.columns(2)
     with col1:
-        st.image(sample_image, caption="Original Sample", use_column_width=True)
+        st.image(sample_image, caption="Original Sample", use_container_width=True)
     with col2:
         if preview_image:
-            st.image(preview_image, caption="Augmented Preview", use_column_width=True)
+            st.image(preview_image, caption="Augmented Preview", use_container_width=True)
 
 # ────────────────────────────── MAIN: PROCESS INPUT IMAGES ──────────────────────────────
 
