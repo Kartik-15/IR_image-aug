@@ -65,21 +65,18 @@ tint_vals = {
 }
 
 # ──────────────────────────────────
-# Sidebar Sample Image Selection
+# Sample Image Selection + Previews
 # ──────────────────────────────────
+st.sidebar.subheader("🔍 Select Sample Image")
 sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
-selected_sample = None
-
+sample_dict = {os.path.basename(f): f for f in sample_files}
 if sample_files:
-    st.sidebar.subheader("🖼 Select Sample Image")
-    thumbs = []
-    for i, path in enumerate(sample_files):
-        img = cv2.imread(path)
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        thumbs.append((os.path.basename(path), img_rgb))
-    
-    selected_filename = st.sidebar.radio("Choose preview image", [f[0] for f in thumbs])
-    selected_sample = next(img for fname, img in thumbs if fname == selected_filename)
+    sample_name = st.sidebar.selectbox("Choose image", list(sample_dict.keys()))
+    preview_img = cv2.cvtColor(cv2.imread(sample_dict[sample_name]), cv2.COLOR_BGR2RGB)
+    st.sidebar.image(preview_img, caption="Sample Preview", use_container_width=True)
+else:
+    preview_img = None
+    st.sidebar.warning("No sample image found in the 'Sample' folder.")
 
 # ──────────────────────────────────
 # Live Preview Section
@@ -87,16 +84,31 @@ if sample_files:
 st.markdown("---")
 st.header("🔍 Live Preview (Sample Image)")
 
-if selected_sample is not None:
-    st.sidebar.subheader("🔧 Preview Controls")
-    preview_col = st.columns(2)
-    with preview_col[0]:
-        tint_preview = st.sidebar.slider("Tint Opacity", 0.0, 1.0, 0.25, step=0.05)
-        shadow_strength = st.sidebar.slider("Shadow Strength", 0.0, 1.0, 0.45, step=0.05)
-        reflection_intensity = st.sidebar.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
-        blur_strength = st.sidebar.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
+if preview_img is not None:
+    st.sidebar.subheader("Preview Settings")
+    tint_preview = st.sidebar.slider("Tint Opacity", 0.0, 1.0, 0.25, step=0.05)
+    shadow_strength = st.sidebar.slider("Shadow Strength", 0.0, 1.0, 0.45, step=0.05)
+    reflection_intensity = st.sidebar.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
+    blur_strength = st.sidebar.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
 
-    img_prev = selected_sample.copy()
+    # Collect overlays from sidebar checkboxes
+    overlay_imgs=[]
+    OV_DIR="overlays"
+    for p in glob.glob(f"{OV_DIR}/*.*"):
+        lbl=os.path.splitext(os.path.basename(p))[0]
+        col1,col2=st.sidebar.columns([1,4])
+        with col1: st.image(p,use_container_width=True)
+        with col2:
+            if st.checkbox(lbl,key=f"ov_{lbl}"):
+                img=cv2.imread(p,cv2.IMREAD_UNCHANGED); overlay_imgs.append((lbl,img))
+
+    for f in ov_uploads:
+        data=np.frombuffer(f.read(),np.uint8)
+        img=cv2.imdecode(data,cv2.IMREAD_UNCHANGED)
+        overlay_imgs.append((os.path.splitext(f.name)[0],img))
+
+    # Build preview image
+    img_prev = preview_img.copy()
     if tint_opts:
         img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
     if "Shadow" in augmentations:
@@ -105,28 +117,12 @@ if selected_sample is not None:
         img_prev = apply_glass_reflection(img_prev, reflection_intensity)
     if "Blur" in augmentations:
         img_prev = apply_gaussian_blur(img_prev, blur_strength)
+    if overlay_imgs:
+        img_prev = apply_overlay(img_prev, overlay_imgs[0][1])
 
-    st.image(img_prev, caption="Live Preview", width=400, use_container_width=False)
+    st.image(img_prev, caption="Live Preview", width=400)
 else:
-    st.warning("No sample image found in the 'Sample' folder. Please add at least one .jpg file.")
-
-# ──────────────────────────────────
-# Overlay images
-# ──────────────────────────────────
-overlay_imgs=[]
-OV_DIR="overlays"
-for p in glob.glob(f"{OV_DIR}/*.*"):
-    lbl=os.path.splitext(os.path.basename(p))[0]
-    col1,col2=st.sidebar.columns([1,4])
-    with col1: st.image(p,use_container_width=True)
-    with col2:
-        if st.checkbox(lbl,key=f"ov_{lbl}"):
-            img=cv2.imread(p,cv2.IMREAD_UNCHANGED); overlay_imgs.append((lbl,img))
-
-for f in ov_uploads:
-    data=np.frombuffer(f.read(),np.uint8)
-    img=cv2.imdecode(data,cv2.IMREAD_UNCHANGED)
-    overlay_imgs.append((os.path.splitext(f.name)[0],img))
+    st.warning("No preview image available.")
 
 # ──────────────────────────────────
 # PROCESS
