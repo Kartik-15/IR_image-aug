@@ -209,3 +209,29 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                 st.download_button("📦 Download All", zip_buf.getvalue(), "augmented_images.zip", "application/zip")
             else:
                 st.warning("No output images generated.")
+                                                            "Perspective": apply_perspective_transform,
+                                        }.get(aug)
+
+                                        if func:
+                                            path = save_aug(img_bto, func, base, f"{suffix}_{aug.lower()}", out_dir)
+                                            if path: output_files.append(path)
+                                else:
+                                    # No augmentation, save as-is
+                                    path = save_aug(img_bto, lambda x: x, base, suffix, out_dir)
+                                    if path: output_files.append(path)
+
+            # Zipping output
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zipf:
+                for file_path in output_files:
+                    arcname = os.path.basename(file_path)
+                    zipf.write(file_path, arcname=arcname)
+
+            st.success(f"Processed {len(output_files)} images.")
+            st.download_button(
+                label="📦 Download ZIP",
+                data=zip_buffer.getvalue(),
+                file_name="augmented_images.zip",
+                mime="application/zip"
+            )
+
