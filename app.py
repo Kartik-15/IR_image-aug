@@ -40,17 +40,15 @@ def save_aug(img, func, name, suf, out_dir):
     return path
 
 # ──────────────────────────────────
-# Sidebar + Upload Section
+# UI Setup
 # ──────────────────────────────────
 st.set_page_config(layout="wide")
 st.title("🧪 Custom Image Augmentation Tool")
 
-col_upload, col_preview = st.columns([1, 2])
+left_col, mid_col, right_col = st.columns([1, 1.5, 1.5])
 
-with col_upload:
-    up_files = st.file_uploader("Upload images / zip", accept_multiple_files=True)
-    ov_uploads = st.file_uploader("Upload Overlay(s)", type=["png","jpg"], accept_multiple_files=True)
-
+# Sidebar settings
+with st.sidebar:
     st.header("🔧 Settings")
     augmentations = st.multiselect("Augmentations", ["Shadow","Reflection","Blur","Occlusion","Perspective"])
     brightness_opts = st.multiselect("Brightness", ["dark","normal","bright"])
@@ -65,28 +63,14 @@ with col_upload:
         "bluish_white":(200,220,255),"soft_pink":(255,220,230),"daylight":(255,255,240)
     }
 
-    # Overlay loading
-    overlay_imgs=[]
-    OV_DIR="overlays"
-    for p in glob.glob(f"{OV_DIR}/*.*"):
-        lbl=os.path.splitext(os.path.basename(p))[0]
-        col1,col2=st.columns([1,4])
-        with col1: st.image(p,use_container_width=True)
-        with col2:
-            if st.checkbox(lbl,key=f"ov_{lbl}"):
-                img=cv2.imread(p,cv2.IMREAD_UNCHANGED); overlay_imgs.append((lbl,img))
+# Upload section
+with right_col:
+    up_files = st.file_uploader("Upload images / zip", accept_multiple_files=True)
+    ov_uploads = st.file_uploader("Upload Overlay(s)", type=["png","jpg"], accept_multiple_files=True)
 
-    for f in ov_uploads:
-        data=np.frombuffer(f.read(),np.uint8)
-        img=cv2.imdecode(data,cv2.IMREAD_UNCHANGED)
-        overlay_imgs.append((os.path.splitext(f.name)[0],img))
-
-# ──────────────────────────────────
-# Preview Section
-# ──────────────────────────────────
-with col_preview:
-    st.subheader("🔍 Live Preview (Sample Image)")
-
+# Sample image selection
+with mid_col:
+    st.subheader("🖼 Sample Image Preview")
     sample_imgs = sorted(glob.glob("Sample/*.*"))
     sample_col_imgs = [cv2.cvtColor(cv2.imread(p), cv2.COLOR_BGR2RGB) for p in sample_imgs]
     sel_sample = None
@@ -97,8 +81,11 @@ with col_preview:
         if col.button(os.path.basename(path), key=f"sample_btn_{i}"):
             sample_idx = i
     sel_sample = sample_col_imgs[sample_idx]
-    st.image(sel_sample, caption=f"Selected Sample: {os.path.basename(sample_imgs[sample_idx])}")
+    st.image(sel_sample, caption=f"Selected Sample: {os.path.basename(sample_imgs[sample_idx])}", width=300)
 
+# Live Preview
+with right_col:
+    st.subheader("🔍 Live Preview")
     preview_img = sel_sample.copy()
     shadow_opacity, refl_opacity = 0.45, 0.12
     overlay_opacities = {}
@@ -112,6 +99,19 @@ with col_preview:
         refl_opacity = st.slider("Reflection Strength", 0.0, 1.0, 0.12, 0.01)
         preview_img = apply_glass_reflection(preview_img, strength=refl_opacity)
 
+    # Overlay loading
+    overlay_imgs=[]
+    OV_DIR="overlays"
+    for p in glob.glob(f"{OV_DIR}/*.*"):
+        lbl=os.path.splitext(os.path.basename(p))[0]
+        if st.checkbox(lbl,key=f"ov_{lbl}"):
+            img=cv2.imread(p,cv2.IMREAD_UNCHANGED); overlay_imgs.append((lbl,img))
+
+    for f in ov_uploads:
+        data=np.frombuffer(f.read(),np.uint8)
+        img=cv2.imdecode(data,cv2.IMREAD_UNCHANGED)
+        overlay_imgs.append((os.path.splitext(f.name)[0],img))
+
     for name, ov_img in overlay_imgs:
         overlay_opacities[name] = st.slider(f"Overlay '{name}' Opacity", 0.0, 1.0, 0.3, 0.05, key=name)
         preview_img = apply_overlay(preview_img, ov_img, alpha=overlay_opacities[name])
@@ -123,7 +123,7 @@ with col_preview:
     for b in brightness_opts:
         preview_img = np.clip(preview_img * brightness_vals[b], 0, 255).astype(np.uint8)
 
-    st.image(preview_img, caption="Combined Preview")
+    st.image(preview_img, caption="Combined Preview", width=500)
 
 # ──────────────────────────────────
 # PROCESS
@@ -163,29 +163,22 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                                     func={
                                         "Shadow":lambda x: apply_shadow(x, strength=shadow_opacity),
                                         "Reflection":lambda x: apply_glass_reflection(x, strength=refl_opacity),
-                                        "Blur":apply_gaussian_blur,"Occlusion":apply_random_occlusion,
+                                        "Blur":apply_gaussian_blur,
+                                        "Occlusion":apply_random_occlusion,
                                         "Perspective":apply_perspective_transform
                                     }[aug]
-                                    path = save_aug(img_bto,func,base,f"{suffix}_{aug.lower()}",out_dir)
+                                    path = save_aug(img_bto, func, base, suffix+"_"+aug.lower(), out_dir)
                                     output_files.append(path)
                             else:
                                 path = os.path.join(out_dir,f"{base}_{suffix}.jpg")
-                                cv2.imwrite(path,cv2.cvtColor(img_bto,cv2.COLOR_RGB2BGR))
+                                cv2.imwrite(path, cv2.cvtColor(img_bto, cv2.COLOR_RGB2BGR))
                                 output_files.append(path)
 
-            st.success("✅ Done")
+            zip_path = os.path.join(tempfile.gettempdir(), "augmented_images.zip")
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for file in output_files:
+                    zipf.write(file, os.path.basename(file))
 
-            if len(output_files) < 5:
-                for path in output_files:
-                    fname = os.path.basename(path)
-                    with open(path, "rb") as f:
-                        img_bytes = f.read()
-                        st.image(img_bytes, caption=fname, use_column_width=True)
-                        st.download_button("Download "+fname, img_bytes, file_name=fname)
-            else:
-                buf=BytesIO()
-                with zipfile.ZipFile(buf,"w") as z:
-                    for f in output_files:
-                        z.write(f, os.path.basename(f))
-                buf.seek(0)
-                st.download_button("📦 Download All as ZIP", buf, file_name="augmented_images.zip")
+            st.success(f"Done! Total output images: {len(output_files)}")
+            with open(zip_path, "rb") as f:
+                st.download_button("📦 Download ZIP", f.read(), file_name="augmented_images.zip")
