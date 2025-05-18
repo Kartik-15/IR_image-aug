@@ -26,8 +26,8 @@ def apply_gaussian_blur(img, k=7):
     k = k if k % 2 == 1 else k+1
     return cv2.GaussianBlur(img, (k,k), 0)
 
-def apply_random_occlusion(img): return img
-def apply_perspective_transform(img): return img
+def apply_random_occlusion(img):   return img  # stub
+def apply_perspective_transform(i):return i    # stub
 
 def apply_overlay(base, overlay, alpha=0.3):
     ov = cv2.resize(overlay,(base.shape[1],base.shape[0]))
@@ -67,15 +67,17 @@ tint_vals = {
 # ──────────────────────────────────
 # Live Preview Section
 # ──────────────────────────────────
+st.markdown("---")
+st.header("🔍 Live Preview (Sample Image)")
+
 sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
 selected_sample = None
-if sample_files:
-    st.sidebar.subheader("🖼️ Choose a Sample Image")
-    filenames = [os.path.basename(p) for p in sample_files]
-    selected_filename = st.sidebar.selectbox("Sample Images", filenames)
-    selected_sample = os.path.join("Sample", selected_filename)
-    preview_img = cv2.cvtColor(cv2.imread(selected_sample), cv2.COLOR_BGR2RGB)
 
+if sample_files:
+    sample_names = [os.path.basename(f) for f in sample_files]
+    selected_name = st.sidebar.selectbox("Choose Sample Image", sample_names)
+    selected_sample = os.path.join("Sample", selected_name)
+    preview_img = cv2.cvtColor(cv2.imread(selected_sample), cv2.COLOR_BGR2RGB)
     st.sidebar.image(preview_img, caption="Selected Sample", use_container_width=True)
 
     st.sidebar.subheader("🔧 Preview Controls")
@@ -84,8 +86,6 @@ if sample_files:
     reflection_intensity = st.sidebar.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
     blur_strength = st.sidebar.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
 
-    st.markdown("---")
-    st.header("🔍 Live Preview")
     img_prev = preview_img.copy()
     if tint_opts:
         img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
@@ -95,6 +95,27 @@ if sample_files:
         img_prev = apply_glass_reflection(img_prev, reflection_intensity)
     if "Blur" in augmentations:
         img_prev = apply_gaussian_blur(img_prev, blur_strength)
+
+    # Apply first overlay if selected
+    selected_overlay_img = None
+    overlay_imgs_for_preview = []
+
+    for f in ov_uploads:
+        data = np.frombuffer(f.read(), np.uint8)
+        img = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+        overlay_imgs_for_preview.append(img)
+    if overlay_imgs_for_preview:
+        selected_overlay_img = overlay_imgs_for_preview[0]
+    else:
+        OV_DIR = "overlays"
+        for p in glob.glob(f"{OV_DIR}/*.*"):
+            lbl = os.path.splitext(os.path.basename(p))[0]
+            if st.sidebar.checkbox(lbl, key=f"ov_{lbl}_preview"):
+                selected_overlay_img = cv2.imread(p, cv2.IMREAD_UNCHANGED)
+                break
+
+    if selected_overlay_img is not None:
+        img_prev = apply_overlay(img_prev, selected_overlay_img)
 
     st.image(img_prev, caption="Live Preview", width=400)
 else:
@@ -167,8 +188,7 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
 
             st.success("✅ Done")
 
-            # Display total number of images generated
-            st.info(f"📸 Total images generated: **{len(output_files)}**")
+            st.info(f"🖼️ Total Images Generated: {len(output_files)}")
 
             if len(output_files) < 5:
                 for path in output_files:
