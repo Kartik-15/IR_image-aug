@@ -1,190 +1,137 @@
-import streamlit as st, cv2, numpy as np, os, glob, zipfile, tempfile
+import streamlit as st
+from PIL import Image, ImageEnhance, ImageOps
+import os
+import numpy as np
+import cv2
 from io import BytesIO
+import zipfile
+from datetime import datetime
 
-# ──────────────────────────────────
-# Aug helpers
-# ──────────────────────────────────
-def apply_tint(img, color, a=0.25):
-    layer = np.full_like(img, color, np.uint8)
-    return cv2.addWeighted(img, 1-a, layer, a, 0)
+# ────────────────────────────────── SETUP ──────────────────────────────────
 
-def apply_shadow(img, strength=0.45):
-    h, w = img.shape[:2]
-    mask = np.zeros_like(img)
-    cv2.rectangle(mask, (int(w*0.3),0), (w,int(h*0.7)), (0,0,0), -1)
-    return cv2.addWeighted(img, 1, mask, strength, 0)
-
-def apply_glass_reflection(img, strength=0.12):
-    over = np.zeros_like(img)
-    h, w = img.shape[:2]
-    for x in range(0, w, w//20):
-        cv2.line(over, (x,0), (x-h//2, h), (255,255,255), 1)
-    over = cv2.GaussianBlur(over, (0,0), 5)
-    return cv2.addWeighted(img, 1, over, strength, 0)
-
-def apply_gaussian_blur(img): return cv2.GaussianBlur(img, (7,7), 0)
-def apply_random_occlusion(img): return img  # Placeholder
-def apply_perspective_transform(img): return img  # Placeholder
-
-def apply_overlay(base, overlay, alpha=0.3):
-    ov = cv2.resize(overlay, (base.shape[1], base.shape[0]))
-    if ov.shape[2] == 4: ov = cv2.cvtColor(ov, cv2.COLOR_BGRA2BGR)
-    if base.shape[2] == 4: base = cv2.cvtColor(base, cv2.COLOR_BGRA2BGR)
-    return cv2.addWeighted(base, 1, ov, alpha, 0)
-
-# ──────────────────────────────────
-# Streamlit Setup
-# ──────────────────────────────────
 st.set_page_config(layout="wide")
 st.title("🧪 Custom Image Augmentation Tool")
 
-col_upload, col_preview = st.columns([1, 2])
+SAMPLE_FOLDER = "Sample"
+OUTPUT_FOLDER = "Output"
+OVERLAY_FOLDER = "overlays"
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-with col_upload:
-    up_files = st.file_uploader("Upload images / zip", accept_multiple_files=True)
-    ov_uploads = st.file_uploader("Upload Overlay(s)", type=["png","jpg"], accept_multiple_files=True)
+# Load sample images
+sample_images = [f for f in os.listdir(SAMPLE_FOLDER) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+if not sample_images:
+    st.warning("No sample images found in the 'Sample' folder.")
+    st.stop()
 
-    st.header("🔧 Settings")
-    augmentations = st.multiselect("Augmentations", ["Shadow","Reflection","Blur","Occlusion","Perspective"])
-    brightness_opts = st.multiselect("Brightness", ["dark","normal","bright"])
-    tint_opts = st.multiselect("Tints", [
-        "warm","cool","cool_white","warm_white","fluorescent_green",
-        "bluish_white","soft_pink","daylight"
-    ])
+# Load overlays
+overlay_files = [f for f in os.listdir(OVERLAY_FOLDER) if f.lower().endswith(('.png'))]
+overlay_imgs = {f: Image.open(os.path.join(OVERLAY_FOLDER, f)).convert("RGBA") for f in overlay_files}
 
-    brightness_vals = {"dark":0.8, "normal":1.2, "bright":1.4}
-    tint_vals = {
-        "warm":(0,30,80),"cool":(80,30,0),"cool_white":(220,255,255),
-        "warm_white":(255,240,200),"fluorescent_green":(220,255,220),
-        "bluish_white":(200,220,255),"soft_pink":(255,220,230),"daylight":(255,255,240)
-    }
+# Load input images
+input_images = [f for f in os.listdir("Input") if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+if not input_images:
+    st.warning("No input images found in the 'Input' folder.")
+    st.stop()
 
-    overlay_imgs = []
-    OV_DIR = "overlays"
-    os.makedirs(OV_DIR, exist_ok=True)
+# ──────────────────────────────── AUGMENT OPTIONS ────────────────────────────────
 
-    for p in glob.glob(f"{OV_DIR}/*.*"):
-        lbl = os.path.splitext(os.path.basename(p))[0]
-        col1, col2 = st.columns([1,4])
-        with col1: st.image(p, use_container_width=True)
-        with col2:
-            if st.checkbox(lbl, key=f"ov_{lbl}"):
-                img = cv2.imread(p, cv2.IMREAD_UNCHANGED)
-                overlay_imgs.append((lbl, img))
+st.sidebar.header("🔧 Augmentation Options")
 
-    for f in ov_uploads:
-        try:
-            data = np.frombuffer(f.read(), np.uint8)
-            img = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
-            if img is not None:
-                overlay_imgs.append((os.path.splitext(f.name)[0], img))
-        except Exception as e:
-            st.warning(f"Failed to read overlay: {f.name} ({e})")
+# Brightness
+brightness_toggle = st.sidebar.checkbox("Brightness Adjustment", value=True)
+brightness_opts = {}
+if brightness_toggle:
+    brightness_opts['min'] = st.sidebar.slider("Brightness Min", 0.5, 1.0, 0.8, 0.05)
+    brightness_opts['max'] = st.sidebar.slider("Brightness Max", 1.0, 1.5, 1.2, 0.05)
 
-with col_preview:
-    st.subheader("🔍 Live Preview (Sample Image)")
+# Tint
+tint_toggle = st.sidebar.checkbox("Apply Tint", value=True)
+tint_opts = {}
+if tint_toggle:
+    tint_opts['R'] = st.sidebar.slider("Red Channel", 0, 100, 0)
+    tint_opts['G'] = st.sidebar.slider("Green Channel", 0, 100, 0)
+    tint_opts['B'] = st.sidebar.slider("Blue Channel", 0, 100, 0)
 
-    sample_imgs = sorted(glob.glob("Sample/*.*"))
-    if sample_imgs:
-        sample_col_imgs = [cv2.cvtColor(cv2.imread(p), cv2.COLOR_BGR2RGB) for p in sample_imgs]
-        sample_idx = 0
-        cols = st.columns(len(sample_imgs))
-        for i, (col, img, path) in enumerate(zip(cols, sample_col_imgs, sample_imgs)):
-            if col.button(os.path.basename(path), key=f"sample_btn_{i}"):
-                sample_idx = i
+# Overlay
+overlay_toggle = st.sidebar.checkbox("Glass Overlay", value=True)
+overlay_opts = {}
+if overlay_toggle and overlay_imgs:
+    selected_overlay = st.sidebar.selectbox("Select Overlay", list(overlay_imgs.keys()))
+    overlay_opts['image'] = overlay_imgs[selected_overlay]
+    overlay_opts['opacity'] = st.sidebar.slider("Overlay Opacity", 0.0, 1.0, 0.5, 0.05)
 
-        sel_sample = sample_col_imgs[sample_idx]
-        st.image(sel_sample, caption=f"Selected Sample: {os.path.basename(sample_imgs[sample_idx])}")
+# ──────────────────────────────── PREVIEW SECTION ────────────────────────────────
 
-        preview_img = sel_sample.copy()
-        shadow_opacity, refl_opacity = 0.45, 0.12
-        overlay_opacities, tint_strengths = {}, {}
+st.subheader("🔍 Preview on Sample Image")
 
-        if "Shadow" in augmentations:
-            shadow_opacity = st.slider("Shadow Strength", 0.0, 1.0, 0.45, 0.05)
-            preview_img = apply_shadow(preview_img, strength=shadow_opacity)
+selected_sample = st.selectbox("Choose a Sample Image", sample_images)
+sample_path = os.path.join(SAMPLE_FOLDER, selected_sample)
+sample_image = Image.open(sample_path).convert("RGB")
 
-        if "Reflection" in augmentations:
-            refl_opacity = st.slider("Reflection Strength", 0.0, 1.0, 0.12, 0.01)
-            preview_img = apply_glass_reflection(preview_img, strength=refl_opacity)
+def apply_augmentations(img, brightness_opts=None, tint_opts=None, overlay_opts=None):
+    img = img.copy()
 
-        for name, ov_img in overlay_imgs:
-            overlay_opacities[name] = st.slider(f"Overlay '{name}' Opacity", 0.0, 1.0, 0.3, 0.05, key=name)
-            preview_img = apply_overlay(preview_img, ov_img, alpha=overlay_opacities[name])
+    # Brightness
+    if brightness_opts:
+        enhancer = ImageEnhance.Brightness(img)
+        factor = np.random.uniform(brightness_opts['min'], brightness_opts['max'])
+        img = enhancer.enhance(factor)
 
-        for tint in tint_opts:
-            tint_strengths[tint] = st.slider(f"Tint '{tint}' Strength", 0.0, 1.0, 0.25, 0.05, key=f"tint_{tint}")
-            preview_img = apply_tint(preview_img, tint_vals[tint], a=tint_strengths[tint])
+    # Tint
+    if tint_opts:
+        r, g, b = tint_opts['R'], tint_opts['G'], tint_opts['B']
+        tint = Image.new("RGB", img.size, (r, g, b))
+        img = Image.blend(img, tint, alpha=0.2)
 
-        for b in brightness_opts:
-            preview_img = np.clip(preview_img * brightness_vals[b], 0, 255).astype(np.uint8)
+    # Overlay
+    if overlay_opts:
+        overlay = overlay_opts['image'].resize(img.size).convert("RGBA")
+        alpha = overlay_opts['opacity']
+        overlay = Image.blend(Image.new("RGBA", img.size, (0,0,0,0)), overlay, alpha=alpha)
+        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
 
-        st.image(preview_img, caption="Combined Preview")
-    else:
-        st.warning("No sample images found in 'Sample' folder.")
+    return img
 
-# ──────────────────────────────────
-# PROCESS
-# ──────────────────────────────────
-if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
-    if st.button("✅ Process Images"):
-        with tempfile.TemporaryDirectory() as inp_dir, tempfile.TemporaryDirectory() as out_dir:
-            for f in up_files:
-                path = os.path.join(inp_dir, f.name)
-                if f.name.endswith(".zip"):
-                    try:
-                        with zipfile.ZipFile(f, "r") as z:
-                            z.extractall(inp_dir)
-                    except:
-                        st.error(f"Could not extract: {f.name}")
-                else:
-                    with open(path, "wb") as fp:
-                        fp.write(f.read())
+preview_image = apply_augmentations(sample_image,
+                                     brightness_opts if brightness_toggle else None,
+                                     tint_opts if tint_toggle else None,
+                                     overlay_opts if overlay_toggle else None)
 
-            st.info("Processing...")
-            output_files = []
-            for root, _, files in os.walk(inp_dir):
-                for fname in files:
-                    if not fname.lower().endswith((".jpg", ".jpeg", ".png")): continue
-                    img_path = os.path.join(root, fname)
-                    img = cv2.imread(img_path)
-                    if img is None: continue
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    base = os.path.splitext(fname)[0]
+col1, col2 = st.columns(2)
+with col1:
+    st.image(sample_image, caption="Original", use_column_width=True)
+with col2:
+    st.image(preview_image, caption="Preview", use_column_width=True)
 
-                    for b in (brightness_opts or ["original"]):
-                        img_b = img if b=="original" else np.clip(img * brightness_vals[b], 0, 255).astype(np.uint8)
-                        for t in (tint_opts or ["original"]):
-                            a_val = tint_strengths.get(t, 0.25)
-                            img_bt = img_b if t=="original" else apply_tint(img_b, tint_vals[t], a=a_val)
-                            for ov_name, ov_img in (overlay_imgs or [("orig", None)]):
-                                ov_val = overlay_opacities.get(ov_name, 0.3)
-                                img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img, alpha=ov_val)
+# ────────────────────────────────── PROCESS ──────────────────────────────────
 
-                                img_aug = img_bto.copy()
-                                if "Shadow" in augmentations:
-                                    img_aug = apply_shadow(img_aug, strength=shadow_opacity)
-                                if "Reflection" in augmentations:
-                                    img_aug = apply_glass_reflection(img_aug, strength=refl_opacity)
-                                if "Blur" in augmentations:
-                                    img_aug = apply_gaussian_blur(img_aug)
-                                if "Occlusion" in augmentations:
-                                    img_aug = apply_random_occlusion(img_aug)
-                                if "Perspective" in augmentations:
-                                    img_aug = apply_perspective_transform(img_aug)
+st.subheader("📸 Process Input Images")
 
-                                suffix = "_".join([s for s in [b, t] if s != "original"])
-                                if ov_img is not None: suffix += f"_ov_{ov_name}"
-                                if not suffix: suffix = "original"
+if st.button("Run Augmentations"):
+    with st.spinner("Processing..."):
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        session_output_dir = os.path.join(OUTPUT_FOLDER, f"aug_{timestamp}")
+        os.makedirs(session_output_dir, exist_ok=True)
 
-                                out_path = os.path.join(out_dir, f"{base}_{suffix}.jpg")
-                                cv2.imwrite(out_path, cv2.cvtColor(img_aug, cv2.COLOR_RGB2BGR))
-                                output_files.append(out_path)
+        for file in input_images:
+            try:
+                img_path = os.path.join("Input", file)
+                img = Image.open(img_path).convert("RGB")
+                aug_img = apply_augmentations(img,
+                                              brightness_opts if brightness_toggle else None,
+                                              tint_opts if tint_toggle else None,
+                                              overlay_opts if overlay_toggle else None)
+                out_path = os.path.join(session_output_dir, file)
+                aug_img.save(out_path)
+            except Exception as e:
+                st.error(f"Error processing {file}: {e}")
 
-            zip_path = os.path.join(tempfile.gettempdir(), "augmented_output.zip")
-            with zipfile.ZipFile(zip_path, "w") as zipf:
-                for f in output_files:
-                    zipf.write(f, os.path.basename(f))
+        # Create zip
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zipf:
+            for f in os.listdir(session_output_dir):
+                zipf.write(os.path.join(session_output_dir, f), arcname=f)
+        zip_buffer.seek(0)
 
-            with open(zip_path, "rb") as f:
-                st.download_button("📥 Download Output Zip", f.read(), file_name="augmented_output.zip")
+        st.success("Processing complete!")
+        st.download_button("📦 Download Zip", data=zip_buffer, file_name="augmented_images.zip", mime="application/zip")
