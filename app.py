@@ -61,34 +61,24 @@ if overlay_toggle and overlay_imgs:
     overlay_opts['image'] = overlay_imgs[selected_overlay]
     overlay_opts['opacity'] = st.sidebar.slider("Overlay Opacity", 0.0, 1.0, 0.5, 0.05)
 
-# ────────────────────────────── AUGMENT FUNCTION ──────────────────────────────
+# ────────────────────────────── MAIN: FILE UPLOAD & PREVIEW ──────────────────────────────
 
-def apply_augmentations(img, brightness_opts=None, tint_opts=None, overlay_opts=None):
-    img = img.convert("RGB")
+st.subheader("📁 Upload Images")
 
-    # Brightness
-    if brightness_opts:
-        enhancer = ImageEnhance.Brightness(img)
-        factor = np.random.uniform(brightness_opts['min'], brightness_opts['max'])
-        img = enhancer.enhance(factor)
+uploaded_files = st.file_uploader("Upload individual image files", accept_multiple_files=True, type=["jpg", "jpeg", "png"])
+if uploaded_files:
+    for uploaded_file in uploaded_files:
+        with open(os.path.join(INPUT_FOLDER, uploaded_file.name), "wb") as f:
+            f.write(uploaded_file.read())
+    st.success("Uploaded individual images successfully!")
 
-    # Tint
-    if tint_opts:
-        r, g, b = tint_opts['R'], tint_opts['G'], tint_opts['B']
-        tint_layer = Image.new("RGB", img.size, (r, g, b))
-        img = Image.blend(img, tint_layer, alpha=0.2)
+uploaded_zip = st.file_uploader("Or upload a .zip of images", type=["zip"])
+if uploaded_zip:
+    with zipfile.ZipFile(uploaded_zip, "r") as zip_ref:
+        zip_ref.extractall(INPUT_FOLDER)
+    st.success("Uploaded and extracted zip file successfully!")
 
-    # Overlay
-    if overlay_opts:
-        base = img.convert("RGBA")
-        overlay = overlay_opts['image'].resize(img.size).convert("RGBA")
-        opacity = overlay_opts['opacity']
-        blended_overlay = Image.blend(Image.new("RGBA", img.size, (0, 0, 0, 0)), overlay, opacity)
-        img = Image.alpha_composite(base, blended_overlay).convert("RGB")
-
-    return img
-
-# ────────────────────────────── MAIN: PREVIEW ──────────────────────────────
+# ────────────────────────────── MAIN: SAMPLE PREVIEW ──────────────────────────────
 
 st.subheader("🔍 Preview on Sample Image")
 
@@ -99,20 +89,36 @@ else:
     sample_path = os.path.join(SAMPLE_FOLDER, selected_sample)
     sample_image = Image.open(sample_path).convert("RGB")
 
-    preview_image = apply_augmentations(
-        sample_image,
-        brightness_opts if brightness_toggle else None,
-        tint_opts if tint_toggle else None,
-        overlay_opts if overlay_toggle else None
-    )
+    preview_image = None
+    try:
+        preview_image = sample_image.copy()
+        preview_image = apply_augmentations(
+            preview_image,
+            brightness_opts if brightness_toggle else None,
+            tint_opts if tint_toggle else None,
+            overlay_opts if overlay_toggle else None
+        )
+    except Exception as e:
+        st.error(f"Error applying augmentations: {e}")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.image(sample_image, caption="Original Sample", use_container_width=True)
+        st.image(sample_image, caption="Original Sample", use_column_width=True)
     with col2:
-        st.image(preview_image, caption="Augmented Preview", use_container_width=True)
+        if preview_image:
+            st.image(preview_image, caption="Augmented Preview", use_column_width=True)
 
-# ────────────────────────────── MAIN: PROCESS INPUT ──────────────────────────────
+# ────────────────────────────── MAIN: OVERLAY IMAGE UPLOAD ──────────────────────────────
+
+st.subheader("🌫️ Upload New Overlay Image")
+overlay_upload = st.file_uploader("Upload a transparent PNG to 'overlays' folder", type=["png"], key="overlay_upload")
+if overlay_upload:
+    overlay_path = os.path.join(OVERLAY_FOLDER, overlay_upload.name)
+    with open(overlay_path, "wb") as f:
+        f.write(overlay_upload.read())
+    st.success(f"Uploaded {overlay_upload.name} to overlays folder. Please refresh the page to use it.")
+
+# ────────────────────────────── MAIN: PROCESS INPUT IMAGES ──────────────────────────────
 
 st.subheader("📸 Process Input Images")
 
@@ -148,3 +154,30 @@ else:
 
             st.success("✅ Processing complete!")
             st.download_button("📦 Download Augmented Images", data=zip_buffer, file_name="augmented_images.zip", mime="application/zip")
+
+# ────────────────────────────── FUNCTION: AUGMENTATION ──────────────────────────────
+
+def apply_augmentations(img, brightness_opts=None, tint_opts=None, overlay_opts=None):
+    img = img.convert("RGB")
+
+    # Brightness
+    if brightness_opts:
+        enhancer = ImageEnhance.Brightness(img)
+        factor = np.random.uniform(brightness_opts['min'], brightness_opts['max'])
+        img = enhancer.enhance(factor)
+
+    # Tint
+    if tint_opts:
+        r, g, b = tint_opts['R'], tint_opts['G'], tint_opts['B']
+        tint_layer = Image.new("RGB", img.size, (r, g, b))
+        img = Image.blend(img, tint_layer, alpha=0.2)
+
+    # Overlay
+    if overlay_opts:
+        base = img.convert("RGBA")
+        overlay = overlay_opts['image'].resize(img.size).convert("RGBA")
+        opacity = overlay_opts['opacity']
+        blended_overlay = Image.blend(Image.new("RGBA", img.size, (0, 0, 0, 0)), overlay, opacity)
+        img = Image.alpha_composite(base, blended_overlay).convert("RGB")
+
+    return img
