@@ -65,13 +65,34 @@ tint_vals = {
 }
 
 # ──────────────────────────────────
-# Live Preview Section
+# Overlay images in sidebar
+# ──────────────────────────────────
+overlay_imgs = []
+OV_DIR = "overlays"
+for p in glob.glob(f"{OV_DIR}/*.*"):
+    lbl = os.path.splitext(os.path.basename(p))[0]
+    col1, col2 = st.sidebar.columns([1, 4])
+    with col1:
+        st.image(p, use_container_width=True)
+    with col2:
+        if st.checkbox(lbl, key=f"ov_{lbl}"):
+            img = cv2.imread(p, cv2.IMREAD_UNCHANGED)
+            overlay_imgs.append((lbl, img))
+
+for f in ov_uploads:
+    data = np.frombuffer(f.read(), np.uint8)
+    if data.size == 0:
+        continue
+    img = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+    overlay_imgs.append((os.path.splitext(f.name)[0], img))
+
+# ──────────────────────────────────
+# Live Preview Section with toggles on right
 # ──────────────────────────────────
 st.markdown("---")
 st.header("🔍 Live Preview (Sample Image)")
 
 sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
-selected_sample = None
 if sample_files:
     sample_labels = [os.path.basename(f) for f in sample_files]
     selected_label = st.sidebar.selectbox("Select a Sample Image", sample_labels)
@@ -81,7 +102,6 @@ if sample_files:
 
     img_prev = preview_img.copy()
 
-    # Columns for image and sliders
     img_col, slider_col = st.columns([2, 1])
     with slider_col:
         st.markdown("#### 🔧 Preview Controls")
@@ -90,8 +110,12 @@ if sample_files:
         reflection_intensity = st.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
         blur_strength = st.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
 
+    # Apply preview effects including overlays to img_prev
     if tint_opts:
         img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
+    if overlay_imgs:
+        ov_img = overlay_imgs[0][1]
+        img_prev = apply_overlay(img_prev, ov_img)
     if "Shadow" in augmentations:
         img_prev = apply_shadow(img_prev, shadow_strength)
     if "Reflection" in augmentations:
@@ -106,34 +130,16 @@ else:
     st.warning("No sample image found in the 'Sample' folder. Please add at least one .jpg file.")
 
 # ──────────────────────────────────
-# Overlay images
-# ──────────────────────────────────
-overlay_imgs=[]
-OV_DIR="overlays"
-for p in glob.glob(f"{OV_DIR}/*.*"):
-    lbl=os.path.splitext(os.path.basename(p))[0]
-    col1,col2=st.sidebar.columns([1,4])
-    with col1: st.image(p,use_container_width=True)
-    with col2:
-        if st.checkbox(lbl,key=f"ov_{lbl}"):
-            img=cv2.imread(p,cv2.IMREAD_UNCHANGED); overlay_imgs.append((lbl,img))
-
-for f in ov_uploads:
-    data=np.frombuffer(f.read(),np.uint8)
-    if data.size == 0: continue
-    img=cv2.imdecode(data,cv2.IMREAD_UNCHANGED)
-    overlay_imgs.append((os.path.splitext(f.name)[0],img))
-
-# ──────────────────────────────────
 # PROCESS
 # ──────────────────────────────────
 if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
     if st.button("✅ Process Images"):
         with tempfile.TemporaryDirectory() as inp_dir, tempfile.TemporaryDirectory() as out_dir:
             for f in up_files:
-                path=os.path.join(inp_dir,f.name)
+                path = os.path.join(inp_dir, f.name)
                 if f.name.endswith(".zip"):
-                    with zipfile.ZipFile(f,"r") as z:z.extractall(inp_dir)
+                    with zipfile.ZipFile(f,"r") as z:
+                        z.extractall(inp_dir)
                 else:
                     open(path,"wb").write(f.read())
 
@@ -141,54 +147,57 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
             output_files = []
             for fname in os.listdir(inp_dir):
                 if not fname.lower().endswith((".jpg",".jpeg",".png")): continue
-                img=cv2.cvtColor(cv2.imread(os.path.join(inp_dir,fname)), cv2.COLOR_BGR2RGB)
-                base=os.path.splitext(fname)[0]
+                img = cv2.cvtColor(cv2.imread(os.path.join(inp_dir, fname)), cv2.COLOR_BGR2RGB)
+                base = os.path.splitext(fname)[0]
 
                 for b in (brightness_opts or ["original"]):
                     img_b = img if b=="original" else np.clip(img*brightness_vals[b],0,255).astype(np.uint8)
                     for t in (tint_opts or ["original"]):
                         img_bt = img_b if t=="original" else apply_tint(img_b, tint_vals[t])
-                        for ov_name,ov_img in (overlay_imgs or [("orig",None)]):
-                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt,ov_img)
+                        for ov_name, ov_img in (overlay_imgs or [("orig", None)]):
+                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img)
 
-                            suffix="_".join([s for s in [b,t] if s!="original"])
-                            if ov_img is not None: suffix += f"_ov_{ov_name}"
+                            suffix = "_".join([s for s in [b,t] if s!="original"])
+                            if ov_img is not None:
+                                suffix += f"_ov_{ov_name}"
                             suffix = suffix or "original"
 
                             if augmentations:
                                 for aug in augmentations:
-                                    func={
+                                    func = {
                                         "Shadow":apply_shadow,
                                         "Reflection":apply_glass_reflection,
                                         "Blur":apply_gaussian_blur,
                                         "Occlusion":apply_random_occlusion,
                                         "Perspective":apply_perspective_transform
                                     }[aug]
-                                    path = save_aug(img_bto,func,base,f"{suffix}_{aug.lower()}",out_dir)
+                                    path = save_aug(img_bto, func, base, f"{suffix}_{aug.lower()}", out_dir)
                                     output_files.append(path)
                             else:
-                                path = os.path.join(out_dir,f"{base}_{suffix}.jpg")
-                                cv2.imwrite(path,cv2.cvtColor(img_bto,cv2.COLOR_RGB2BGR))
+                                path = os.path.join(out_dir, f"{base}_{suffix}.jpg")
+                                cv2.imwrite(path, cv2.cvtColor(img_bto, cv2.COLOR_RGB2BGR))
                                 output_files.append(path)
 
-            st.success(f"✅ Done! Total Images Generated: {len(output_files)}")
+            st.success("✅ Done")
+
+            st.markdown(f"**Total images created: {len(output_files)}**")
 
             if len(output_files) < 5:
-                img_cols = st.columns(len(output_files))
-                for i, path in enumerate(output_files):
+                cols = st.columns(len(output_files))
+                for c, path in zip(cols, output_files):
                     fname = os.path.basename(path)
-                    with img_cols[i]:
-                        with open(path, "rb") as f:
-                            img_bytes = f.read()
-                            st.image(img_bytes, width=160)
-                            st.download_button("Download", img_bytes, file_name=fname)
+                    with open(path, "rb") as f:
+                        img_bytes = f.read()
+                    with c:
+                        st.image(img_bytes, caption=fname, use_container_width=False)
+                        st.download_button("Download", img_bytes, file_name=fname)
             else:
-                buf=BytesIO()
-                with zipfile.ZipFile(buf,"w") as z:
+                buf = BytesIO()
+                with zipfile.ZipFile(buf, "w") as z:
                     for f in output_files:
                         z.write(f, os.path.basename(f))
                 buf.seek(0)
-                st.download_button("Download ZIP",buf.getvalue(),"augmented_images.zip","application/zip")
+                st.download_button("Download ZIP", buf.getvalue(), "augmented_images.zip", "application/zip")
 else:
     if up_files:
         st.warning("Select at least one transformation or overlay.")
