@@ -117,7 +117,7 @@ if sample_images:
             img = Image.open(img_path)
             if st.button("", key=img_path):
                 st.session_state.selected_sample = img_path
-            st.image(img.resize((150, 150)), use_column_width=False, caption=os.path.basename(img_path),
+            st.image(img.resize((150, 150)), use_container_width=False, caption=os.path.basename(img_path),
                      channels="RGB", output_format="JPEG")
 
     with col2:
@@ -125,7 +125,7 @@ if sample_images:
         try:
             img = Image.open(selected_sample)
             augmented_img = augment_image(img, selected_overlay_files, overlay_opacity, brightness, tint_color_rgb, tint_opacity)
-            st.image(augmented_img, caption="Augmented Image Preview", use_column_width=True)
+            st.image(augmented_img, caption="Augmented Image Preview", use_container_width=True)
 
             # Save button
             save_path = os.path.join(OUTPUT_DIR, f"augmented_{os.path.basename(selected_sample)}")
