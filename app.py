@@ -32,18 +32,8 @@ def apply_overlay(base, overlay, alpha=0.3):
     if base.shape[2] == 4: base = cv2.cvtColor(base, cv2.COLOR_BGRA2BGR)
     return cv2.addWeighted(base, 1, ov, alpha, 0)
 
-def save_aug(img, func, name, suf, out_dir):
-    try:
-        out = func(img)
-        path = os.path.join(out_dir, f"{name}_{suf}.jpg")
-        cv2.imwrite(path, cv2.cvtColor(out, cv2.COLOR_RGB2BGR))
-        return path
-    except Exception as e:
-        st.error(f"Error saving {name}: {e}")
-        return None
-
 # ──────────────────────────────────
-# Sidebar + Upload Section
+# Streamlit Setup
 # ──────────────────────────────────
 st.set_page_config(layout="wide")
 st.title("🧪 Custom Image Augmentation Tool")
@@ -69,10 +59,10 @@ with col_upload:
         "bluish_white":(200,220,255),"soft_pink":(255,220,230),"daylight":(255,255,240)
     }
 
-    # Overlay loading
     overlay_imgs = []
     OV_DIR = "overlays"
     os.makedirs(OV_DIR, exist_ok=True)
+
     for p in glob.glob(f"{OV_DIR}/*.*"):
         lbl = os.path.splitext(os.path.basename(p))[0]
         col1, col2 = st.columns([1,4])
@@ -91,9 +81,6 @@ with col_upload:
         except Exception as e:
             st.warning(f"Failed to read overlay: {f.name} ({e})")
 
-# ──────────────────────────────────
-# Preview Section
-# ──────────────────────────────────
 with col_preview:
     st.subheader("🔍 Live Preview (Sample Image)")
 
@@ -174,63 +161,30 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                                 ov_val = overlay_opacities.get(ov_name, 0.3)
                                 img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img, alpha=ov_val)
 
+                                img_aug = img_bto.copy()
+                                if "Shadow" in augmentations:
+                                    img_aug = apply_shadow(img_aug, strength=shadow_opacity)
+                                if "Reflection" in augmentations:
+                                    img_aug = apply_glass_reflection(img_aug, strength=refl_opacity)
+                                if "Blur" in augmentations:
+                                    img_aug = apply_gaussian_blur(img_aug)
+                                if "Occlusion" in augmentations:
+                                    img_aug = apply_random_occlusion(img_aug)
+                                if "Perspective" in augmentations:
+                                    img_aug = apply_perspective_transform(img_aug)
+
                                 suffix = "_".join([s for s in [b, t] if s != "original"])
                                 if ov_img is not None: suffix += f"_ov_{ov_name}"
-                                suffix = suffix or "original"
+                                if not suffix: suffix = "original"
 
-                                if augmentations:
-                                    for aug in augmentations:
-                                        func = {
-                                            "Shadow": lambda x: apply_shadow(x, strength=shadow_opacity),
-                                            "Reflection": lambda x: apply_glass_reflection(x, strength=refl_opacity),
-                                            "Blur": apply_gaussian_blur,
-                                            "Occlusion": apply_random_occlusion,
-                                            "Perspective": apply_perspective_transform
-                                        }.get(aug)
-                                        if func:
-                                            out_path = save_aug(img_bto, func, base, f"{suffix}_{aug.lower()}", out_dir)
-                                            if out_path: output_files.append(out_path)
-                                else:
-                                    out_path = os.path.join(out_dir, f"{base}_{suffix}.jpg")
-                                    cv2.imwrite(out_path, cv2.cvtColor(img_bto, cv2.COLOR_RGB2BGR))
-                                    output_files.append(out_path)
+                                out_path = os.path.join(out_dir, f"{base}_{suffix}.jpg")
+                                cv2.imwrite(out_path, cv2.cvtColor(img_aug, cv2.COLOR_RGB2BGR))
+                                output_files.append(out_path)
 
-            st.success("✅ Done")
+            zip_path = os.path.join(tempfile.gettempdir(), "augmented_output.zip")
+            with zipfile.ZipFile(zip_path, "w") as zipf:
+                for f in output_files:
+                    zipf.write(f, os.path.basename(f))
 
-            if output_files:
-                st.markdown("### 🎯 Results")
-                for path in output_files[:5]:
-                    st.image(path, caption=os.path.basename(path))
-
-                zip_buf = BytesIO()
-                with zipfile.ZipFile(zip_buf, "w") as zf:
-                    for path in output_files:
-                        zf.write(path, os.path.basename(path))
-                st.download_button("📦 Download All", zip_buf.getvalue(), "augmented_images.zip", "application/zip")
-            else:
-                st.warning("No output images generated.")
-                "Perspective": apply_perspective_transform,
-            }.get(aug)
-
-            if func:
-                path = save_aug(img_bto, func, base, f"{suffix}_{aug.lower()}", out_dir)
-                if path: output_files.append(path)
-            else:
-            # No augmentation, save as-is
-                path = save_aug(img_bto, lambda x: x, base, suffix, out_dir)
-                if path: output_files.append(path)
-
-            # Zipping output
-            zip_buffer = BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w") as zipf:
-                for file_path in output_files:
-                    arcname = os.path.basename(file_path)
-                    zipf.write(file_path, arcname=arcname)
-
-            st.success(f"Processed {len(output_files)} images.")
-            st.download_button(
-                label="📦 Download ZIP",
-                data=zip_buffer.getvalue(),
-                file_name="augmented_images.zip",
-                mime="application/zip"
-            )
+            with open(zip_path, "rb") as f:
+                st.download_button("📥 Download Output Zip", f.read(), file_name="augmented_output.zip")
