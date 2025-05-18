@@ -11,26 +11,21 @@ from datetime import datetime
 st.set_page_config(layout="wide")
 st.title("🧪 Custom Image Augmentation Tool")
 
+# Define required folders
 SAMPLE_FOLDER = "Sample"
 INPUT_FOLDER = "Input"
 OVERLAY_FOLDER = "overlays"
 OUTPUT_FOLDER = "Output"
 
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+# Create required folders if they don't exist
+for folder in [SAMPLE_FOLDER, INPUT_FOLDER, OVERLAY_FOLDER, OUTPUT_FOLDER]:
+    os.makedirs(folder, exist_ok=True)
 
 # ────────────────────────────── LOAD FILES ──────────────────────────────
 
 sample_images = [f for f in os.listdir(SAMPLE_FOLDER) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
 input_images = [f for f in os.listdir(INPUT_FOLDER) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
 overlay_files = [f for f in os.listdir(OVERLAY_FOLDER) if f.lower().endswith('.png')]
-
-if not sample_images:
-    st.warning("No sample images found in the 'Sample' folder.")
-    st.stop()
-
-if not input_images:
-    st.warning("No input images found in the 'Input' folder.")
-    st.stop()
 
 overlay_imgs = {}
 for f in overlay_files:
@@ -97,53 +92,59 @@ def apply_augmentations(img, brightness_opts=None, tint_opts=None, overlay_opts=
 
 st.subheader("🔍 Preview on Sample Image")
 
-selected_sample = st.selectbox("Choose a Sample Image", sample_images)
-sample_path = os.path.join(SAMPLE_FOLDER, selected_sample)
-sample_image = Image.open(sample_path).convert("RGB")
+if not sample_images:
+    st.warning("No sample images found in the 'Sample' folder.")
+else:
+    selected_sample = st.selectbox("Choose a Sample Image", sample_images)
+    sample_path = os.path.join(SAMPLE_FOLDER, selected_sample)
+    sample_image = Image.open(sample_path).convert("RGB")
 
-preview_image = apply_augmentations(
-    sample_image,
-    brightness_opts if brightness_toggle else None,
-    tint_opts if tint_toggle else None,
-    overlay_opts if overlay_toggle else None
-)
+    preview_image = apply_augmentations(
+        sample_image,
+        brightness_opts if brightness_toggle else None,
+        tint_opts if tint_toggle else None,
+        overlay_opts if overlay_toggle else None
+    )
 
-col1, col2 = st.columns(2)
-with col1:
-    st.image(sample_image, caption="Original Sample", use_column_width=True)
-with col2:
-    st.image(preview_image, caption="Augmented Preview", use_column_width=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(sample_image, caption="Original Sample", use_column_width=True)
+    with col2:
+        st.image(preview_image, caption="Augmented Preview", use_column_width=True)
 
-# ────────────────────────────── MAIN: PROCESS IMAGES ──────────────────────────────
+# ────────────────────────────── MAIN: PROCESS INPUT ──────────────────────────────
 
 st.subheader("📸 Process Input Images")
 
-if st.button("Run Augmentations"):
-    with st.spinner("Processing images..."):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_output_dir = os.path.join(OUTPUT_FOLDER, f"aug_{timestamp}")
-        os.makedirs(session_output_dir, exist_ok=True)
+if not input_images:
+    st.warning("No input images found in the 'Input' folder.")
+else:
+    if st.button("Run Augmentations"):
+        with st.spinner("Processing images..."):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_output_dir = os.path.join(OUTPUT_FOLDER, f"aug_{timestamp}")
+            os.makedirs(session_output_dir, exist_ok=True)
 
-        for file in input_images:
-            try:
-                path = os.path.join(INPUT_FOLDER, file)
-                img = Image.open(path).convert("RGB")
-                aug_img = apply_augmentations(
-                    img,
-                    brightness_opts if brightness_toggle else None,
-                    tint_opts if tint_toggle else None,
-                    overlay_opts if overlay_toggle else None
-                )
-                aug_img.save(os.path.join(session_output_dir, file))
-            except Exception as e:
-                st.error(f"Error processing {file}: {e}")
+            for file in input_images:
+                try:
+                    path = os.path.join(INPUT_FOLDER, file)
+                    img = Image.open(path).convert("RGB")
+                    aug_img = apply_augmentations(
+                        img,
+                        brightness_opts if brightness_toggle else None,
+                        tint_opts if tint_toggle else None,
+                        overlay_opts if overlay_toggle else None
+                    )
+                    aug_img.save(os.path.join(session_output_dir, file))
+                except Exception as e:
+                    st.error(f"Error processing {file}: {e}")
 
-        # Create zip
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w") as zipf:
-            for f in os.listdir(session_output_dir):
-                zipf.write(os.path.join(session_output_dir, f), arcname=f)
-        zip_buffer.seek(0)
+            # Create zip
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zipf:
+                for f in os.listdir(session_output_dir):
+                    zipf.write(os.path.join(session_output_dir, f), arcname=f)
+            zip_buffer.seek(0)
 
-        st.success("✅ Processing complete!")
-        st.download_button("📦 Download Augmented Images", data=zip_buffer, file_name="augmented_images.zip", mime="application/zip")
+            st.success("✅ Processing complete!")
+            st.download_button("📦 Download Augmented Images", data=zip_buffer, file_name="augmented_images.zip", mime="application/zip")
