@@ -15,6 +15,8 @@ st.title("🧪 Custom Image Augmentation Tool")
 SAMPLE_FOLDER = "Sample"
 OUTPUT_FOLDER = "Output"
 OVERLAY_FOLDER = "overlays"
+INPUT_FOLDER = "Input"
+
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # Load sample images
@@ -24,18 +26,18 @@ if not sample_images:
     st.stop()
 
 # Load overlays
-overlay_files = [f for f in os.listdir(OVERLAY_FOLDER) if f.lower().endswith(('.png'))]
+overlay_files = [f for f in os.listdir(OVERLAY_FOLDER) if f.lower().endswith('.png')]
 overlay_imgs = {f: Image.open(os.path.join(OVERLAY_FOLDER, f)).convert("RGBA") for f in overlay_files}
 
 # Load input images
-input_images = [f for f in os.listdir("Input") if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+input_images = [f for f in os.listdir(INPUT_FOLDER) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
 if not input_images:
     st.warning("No input images found in the 'Input' folder.")
     st.stop()
 
-# ──────────────────────────────── AUGMENT OPTIONS ────────────────────────────────
+# ──────────────────────────────── SIDEBAR SETTINGS ────────────────────────────────
 
-st.sidebar.header("🔧 Augmentation Options")
+st.sidebar.header("🎛️ Augmentation Settings")
 
 # Brightness
 brightness_toggle = st.sidebar.checkbox("Brightness Adjustment", value=True)
@@ -60,13 +62,7 @@ if overlay_toggle and overlay_imgs:
     overlay_opts['image'] = overlay_imgs[selected_overlay]
     overlay_opts['opacity'] = st.sidebar.slider("Overlay Opacity", 0.0, 1.0, 0.5, 0.05)
 
-# ──────────────────────────────── PREVIEW SECTION ────────────────────────────────
-
-st.subheader("🔍 Preview on Sample Image")
-
-selected_sample = st.selectbox("Choose a Sample Image", sample_images)
-sample_path = os.path.join(SAMPLE_FOLDER, selected_sample)
-sample_image = Image.open(sample_path).convert("RGB")
+# ──────────────────────────────── AUGMENT FUNCTION ────────────────────────────────
 
 def apply_augmentations(img, brightness_opts=None, tint_opts=None, overlay_opts=None):
     img = img.copy()
@@ -92,6 +88,14 @@ def apply_augmentations(img, brightness_opts=None, tint_opts=None, overlay_opts=
 
     return img
 
+# ──────────────────────────────── PREVIEW SECTION ────────────────────────────────
+
+st.subheader("🔍 Preview on Sample Image")
+
+selected_sample = st.selectbox("Choose a Sample Image", sample_images)
+sample_path = os.path.join(SAMPLE_FOLDER, selected_sample)
+sample_image = Image.open(sample_path).convert("RGB")
+
 preview_image = apply_augmentations(sample_image,
                                      brightness_opts if brightness_toggle else None,
                                      tint_opts if tint_toggle else None,
@@ -103,7 +107,7 @@ with col1:
 with col2:
     st.image(preview_image, caption="Preview", use_column_width=True)
 
-# ────────────────────────────────── PROCESS ──────────────────────────────────
+# ──────────────────────────────── PROCESS SECTION ────────────────────────────────
 
 st.subheader("📸 Process Input Images")
 
@@ -115,7 +119,7 @@ if st.button("Run Augmentations"):
 
         for file in input_images:
             try:
-                img_path = os.path.join("Input", file)
+                img_path = os.path.join(INPUT_FOLDER, file)
                 img = Image.open(img_path).convert("RGB")
                 aug_img = apply_augmentations(img,
                                               brightness_opts if brightness_toggle else None,
