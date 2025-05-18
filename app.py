@@ -112,12 +112,12 @@ if input_images:
             thumbnail = Image.open(img_path).resize((100, 100))
             if st.button(img_file, key=img_file):
                 selected_img_path = img_path
-            st.image(thumbnail, caption=img_file, use_container_width=True)
+            st.image(thumbnail, caption=img_file, use_column_width=True)
 
     with col2:
         st.markdown("### Augmented Preview")
         preview_img = apply_augmentation(Image.open(selected_img_path), overlay_images, apply_blur, brightness_levels[0] if brightness_levels else None, tint_options[0] if tint_options else None)
-        st.image(preview_img, caption="Augmented Image", use_container_width=True)
+        st.image(preview_img, caption="Augmented Image", use_column_width=True)
 
     # Process and save
     if st.button("Run Augmentation"):
