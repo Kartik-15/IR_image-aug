@@ -70,8 +70,9 @@ tint_vals = {
 st.markdown("---")
 st.header("🔍 Live Preview (Sample Image)")
 
-sample_path = os.path.join("Sample", "sample.jpg")
-if os.path.exists(sample_path):
+sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
+if sample_files:
+    sample_path = sample_files[0]
     preview_img = cv2.cvtColor(cv2.imread(sample_path), cv2.COLOR_BGR2RGB)
 
     st.sidebar.subheader("🔧 Preview Controls")
@@ -94,7 +95,7 @@ if os.path.exists(sample_path):
 
     st.image(img_prev, caption="Live Preview", use_column_width=True)
 else:
-    st.warning("Sample image not found in 'Sample/sample.jpg'. Please add one for preview.")
+    st.warning("No sample image found in the 'Sample' folder. Please add at least one .jpg file.")
 
 # ──────────────────────────────────
 # Overlay images
