@@ -26,8 +26,8 @@ def apply_gaussian_blur(img, k=7):
     k = k if k % 2 == 1 else k+1
     return cv2.GaussianBlur(img, (k,k), 0)
 
-def apply_random_occlusion(img):   return img  # stub
-def apply_perspective_transform(i):return i    # stub
+def apply_random_occlusion(img): return img
+def apply_perspective_transform(img): return img
 
 def apply_overlay(base, overlay, alpha=0.3):
     ov = cv2.resize(overlay,(base.shape[1],base.shape[0]))
@@ -65,49 +65,26 @@ tint_vals = {
 }
 
 # ──────────────────────────────────
-# Sample Image Selection + Previews
-# ──────────────────────────────────
-st.sidebar.subheader("🔍 Select Sample Image")
-sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
-sample_dict = {os.path.basename(f): f for f in sample_files}
-if sample_files:
-    sample_name = st.sidebar.selectbox("Choose image", list(sample_dict.keys()))
-    preview_img = cv2.cvtColor(cv2.imread(sample_dict[sample_name]), cv2.COLOR_BGR2RGB)
-    st.sidebar.image(preview_img, caption="Sample Preview", use_container_width=True)
-else:
-    preview_img = None
-    st.sidebar.warning("No sample image found in the 'Sample' folder.")
-
-# ──────────────────────────────────
 # Live Preview Section
 # ──────────────────────────────────
 st.markdown("---")
 st.header("🔍 Live Preview (Sample Image)")
 
-if preview_img is not None:
-    st.sidebar.subheader("Preview Settings")
+sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
+selected_sample = None
+if sample_files:
+    st.sidebar.subheader("🖼️ Choose a Sample Image")
+    filenames = [os.path.basename(p) for p in sample_files]
+    selected_filename = st.sidebar.radio("Sample Images", filenames)
+    selected_sample = os.path.join("Sample", selected_filename)
+    preview_img = cv2.cvtColor(cv2.imread(selected_sample), cv2.COLOR_BGR2RGB)
+
+    st.sidebar.subheader("🔧 Preview Controls")
     tint_preview = st.sidebar.slider("Tint Opacity", 0.0, 1.0, 0.25, step=0.05)
     shadow_strength = st.sidebar.slider("Shadow Strength", 0.0, 1.0, 0.45, step=0.05)
     reflection_intensity = st.sidebar.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
     blur_strength = st.sidebar.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
 
-    # Collect overlays from sidebar checkboxes
-    overlay_imgs=[]
-    OV_DIR="overlays"
-    for p in glob.glob(f"{OV_DIR}/*.*"):
-        lbl=os.path.splitext(os.path.basename(p))[0]
-        col1,col2=st.sidebar.columns([1,4])
-        with col1: st.image(p,use_container_width=True)
-        with col2:
-            if st.checkbox(lbl,key=f"ov_{lbl}"):
-                img=cv2.imread(p,cv2.IMREAD_UNCHANGED); overlay_imgs.append((lbl,img))
-
-    for f in ov_uploads:
-        data=np.frombuffer(f.read(),np.uint8)
-        img=cv2.imdecode(data,cv2.IMREAD_UNCHANGED)
-        overlay_imgs.append((os.path.splitext(f.name)[0],img))
-
-    # Build preview image
     img_prev = preview_img.copy()
     if tint_opts:
         img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
@@ -117,12 +94,28 @@ if preview_img is not None:
         img_prev = apply_glass_reflection(img_prev, reflection_intensity)
     if "Blur" in augmentations:
         img_prev = apply_gaussian_blur(img_prev, blur_strength)
-    if overlay_imgs:
-        img_prev = apply_overlay(img_prev, overlay_imgs[0][1])
 
     st.image(img_prev, caption="Live Preview", width=400)
 else:
-    st.warning("No preview image available.")
+    st.warning("No sample image found in the 'Sample' folder. Please add at least one .jpg file.")
+
+# ──────────────────────────────────
+# Overlay images
+# ──────────────────────────────────
+overlay_imgs=[]
+OV_DIR="overlays"
+for p in glob.glob(f"{OV_DIR}/*.*"):
+    lbl=os.path.splitext(os.path.basename(p))[0]
+    col1,col2=st.sidebar.columns([1,4])
+    with col1: st.image(p,use_container_width=True)
+    with col2:
+        if st.checkbox(lbl,key=f"ov_{lbl}"):
+            img=cv2.imread(p,cv2.IMREAD_UNCHANGED); overlay_imgs.append((lbl,img))
+
+for f in ov_uploads:
+    data=np.frombuffer(f.read(),np.uint8)
+    img=cv2.imdecode(data,cv2.IMREAD_UNCHANGED)
+    overlay_imgs.append((os.path.splitext(f.name)[0],img))
 
 # ──────────────────────────────────
 # PROCESS
@@ -172,6 +165,9 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                                 output_files.append(path)
 
             st.success("✅ Done")
+
+            # NEW: Display total number of images generated
+            st.info(f"📸 Total images generated: **{len(output_files)}**")
 
             if len(output_files) < 5:
                 for path in output_files:
