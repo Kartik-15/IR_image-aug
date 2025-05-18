@@ -67,17 +67,16 @@ tint_vals = {
 # ──────────────────────────────────
 # Live Preview Section
 # ──────────────────────────────────
-st.markdown("---")
-st.header("🔍 Live Preview (Sample Image)")
-
 sample_files = glob.glob(os.path.join("Sample", "*.jpg"))
 selected_sample = None
 if sample_files:
     st.sidebar.subheader("🖼️ Choose a Sample Image")
     filenames = [os.path.basename(p) for p in sample_files]
-    selected_filename = st.sidebar.radio("Sample Images", filenames)
+    selected_filename = st.sidebar.selectbox("Sample Images", filenames)
     selected_sample = os.path.join("Sample", selected_filename)
     preview_img = cv2.cvtColor(cv2.imread(selected_sample), cv2.COLOR_BGR2RGB)
+
+    st.sidebar.image(preview_img, caption="Selected Sample", use_container_width=True)
 
     st.sidebar.subheader("🔧 Preview Controls")
     tint_preview = st.sidebar.slider("Tint Opacity", 0.0, 1.0, 0.25, step=0.05)
@@ -85,6 +84,8 @@ if sample_files:
     reflection_intensity = st.sidebar.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
     blur_strength = st.sidebar.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
 
+    st.markdown("---")
+    st.header("🔍 Live Preview")
     img_prev = preview_img.copy()
     if tint_opts:
         img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
@@ -166,7 +167,7 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
 
             st.success("✅ Done")
 
-            # NEW: Display total number of images generated
+            # Display total number of images generated
             st.info(f"📸 Total images generated: **{len(output_files)}**")
 
             if len(output_files) < 5:
