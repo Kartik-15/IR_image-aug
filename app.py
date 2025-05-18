@@ -103,10 +103,10 @@ else:
 
     col1, col2 = st.columns(2)
     with col1:
-        st.image(sample_image, caption="Original Sample", use_column_width=True)
+        st.image(sample_image, caption="Original Sample", use_container_width=True)
     with col2:
         if preview_image:
-            st.image(preview_image, caption="Augmented Preview", use_column_width=True)
+            st.image(preview_image, caption="Augmented Preview", use_container_width=True)
 
 # ────────────────────────────── MAIN: OVERLAY IMAGE UPLOAD ──────────────────────────────
 
