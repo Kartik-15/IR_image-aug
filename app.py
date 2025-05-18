@@ -1,139 +1,129 @@
 import streamlit as st
-from PIL import Image, ImageEnhance
 import os
-import random
 import zipfile
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+import random
 import shutil
-from io import BytesIO
 
-# Define directories
-SAMPLE_DIR = "Sample"
-OVERLAY_DIR = "overlays"
-OUTPUT_DIR = "output"
+# ───────────────────────────── SETUP ─────────────────────────────
+SAMPLE_FOLDER = "Sample"
+OVERLAY_FOLDER = "overlays"
+OUTPUT_FOLDER = "output"
+INPUT_FOLDER = "Input"
 
-# Ensure output directory exists
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+for folder in [SAMPLE_FOLDER, OVERLAY_FOLDER, OUTPUT_FOLDER, INPUT_FOLDER]:
+    os.makedirs(folder, exist_ok=True)
 
-# Function to apply overlays with opacity
-def apply_overlay(base_img, overlay_img, opacity):
-    overlay = overlay_img.convert("RGBA")
-    base = base_img.convert("RGBA")
+# ────────────────────────── HELPER FUNCTIONS ──────────────────────────
+def apply_augmentation(image, overlay_images, blur=False, brightness=None, tint=None):
+    if blur:
+        image = image.filter(ImageFilter.GaussianBlur(radius=2))
 
-    # Resize overlay to match base image
-    overlay = overlay.resize(base.size)
+    if brightness:
+        enhancer = ImageEnhance.Brightness(image)
+        factor = {"Dark": 0.6, "Normal": 1.0, "Bright": 1.4}.get(brightness, 1.0)
+        image = enhancer.enhance(factor)
 
-    # Adjust overlay opacity
-    alpha = overlay.split()[3]
-    alpha = alpha.point(lambda p: int(p * opacity))
-    overlay.putalpha(alpha)
+    if tint:
+        tint_colors = {
+            "Cool": (173, 216, 230),
+            "Warm": (255, 228, 196),
+            "Daylight": (255, 255, 240),
+        }
+        if tint in tint_colors:
+            overlay = Image.new("RGB", image.size, tint_colors[tint])
+            image = Image.blend(image, overlay, alpha=0.3)
 
-    return Image.alpha_composite(base, overlay)
+    if overlay_images:
+        selected_overlay_path = random.choice(overlay_images)
+        overlay = Image.open(selected_overlay_path).resize(image.size).convert("RGBA")
+        image = image.convert("RGBA")
+        image = Image.alpha_composite(image, overlay).convert("RGB")
 
-# Function to apply brightness
-def apply_brightness(img, brightness_factor):
-    enhancer = ImageEnhance.Brightness(img)
-    return enhancer.enhance(brightness_factor)
+    return image
 
-# Function to apply tint
-def apply_tint(img, tint_color, opacity):
-    tint_layer = Image.new("RGBA", img.size, tint_color + (0,))
-    alpha = int(255 * opacity)
-    tint_layer.putalpha(alpha)
-    return Image.alpha_composite(img.convert("RGBA"), tint_layer)
+def save_augmented_images(image_path, overlay_images, augment_options, brightness_levels, tint_options):
+    original = Image.open(image_path).convert("RGB")
+    filename = os.path.splitext(os.path.basename(image_path))[0]
+    count = 0
 
-# Function to apply selected transformations
-def augment_image(img, selected_overlays, overlay_opacity, brightness, tint_color, tint_opacity):
-    augmented = img.convert("RGBA")
-    for overlay_path in selected_overlays:
-        overlay = Image.open(overlay_path).convert("RGBA")
-        augmented = apply_overlay(augmented, overlay, overlay_opacity)
+    for blur in augment_options:
+        for bright in brightness_levels:
+            for tint in tint_options:
+                augmented = apply_augmentation(original.copy(), overlay_images, blur, bright, tint)
+                output_path = os.path.join(OUTPUT_FOLDER, f"{filename}_b{blur}_l{bright}_t{tint}.jpg")
+                augmented.save(output_path)
+                count += 1
+    return count
 
-    if brightness != 1.0:
-        augmented = apply_brightness(augmented, brightness)
+def list_images(folder):
+    return [f for f in os.listdir(folder) if f.lower().endswith(('png', 'jpg', 'jpeg'))]
 
-    if tint_opacity > 0.0:
-        augmented = apply_tint(augmented, tint_color, tint_opacity)
+# ────────────────────────────── SIDEBAR ──────────────────────────────
+st.sidebar.header("Settings")
 
-    return augmented.convert("RGB")
+# Augmentation settings
+augment_options = st.sidebar.multiselect("Add augmentation", ["Blur"], default=[])
+apply_blur = "Blur" in augment_options
 
-# Function to get overlay file paths
-def get_overlay_files():
-    files = []
-    for file in os.listdir(OVERLAY_DIR):
-        if file.lower().endswith((".png", ".jpg", ".jpeg")):
-            files.append(os.path.join(OVERLAY_DIR, file))
-    return files
+brightness_levels = st.sidebar.multiselect("Add Brightness", ["Dark", "Normal", "Bright"], default=["Normal"])
+tint_options = st.sidebar.multiselect("Add Tints", ["Cool", "Warm", "Daylight"], default=[])
 
-# Function to get sample image file paths
-def get_sample_images():
-    files = []
-    for file in os.listdir(SAMPLE_DIR):
-        if file.lower().endswith((".png", ".jpg", ".jpeg")):
-            files.append(os.path.join(SAMPLE_DIR, file))
-    return files
+# Overlay uploader
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Upload Overlay Images")
+overlay_files = st.sidebar.file_uploader("Upload overlay images (png, jpg)", accept_multiple_files=True)
+if overlay_files:
+    for file in overlay_files:
+        with open(os.path.join(OVERLAY_FOLDER, file.name), "wb") as f:
+            f.write(file.read())
 
-# Sidebar UI settings
-st.sidebar.title("Augmentation Settings")
-
-# Upload section (merged)
-uploaded_files = st.sidebar.file_uploader("Upload images (individual or ZIP)", type=["png", "jpg", "jpeg", "zip"], accept_multiple_files=True)
-
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        if uploaded_file.name.endswith(".zip"):
-            with zipfile.ZipFile(uploaded_file, "r") as zip_ref:
-                zip_ref.extractall(SAMPLE_DIR)
-        else:
-            img = Image.open(uploaded_file)
-            img.save(os.path.join(SAMPLE_DIR, uploaded_file.name))
-
-# Overlay selection
-st.sidebar.subheader("Select Overlays")
-overlay_files = get_overlay_files()
-selected_overlay_files = st.sidebar.multiselect("Choose overlays to apply", overlay_files, default=overlay_files)
-
-# Opacity
-overlay_opacity = st.sidebar.slider("Overlay Opacity", 0.0, 1.0, 0.5, 0.05)
-
-# Brightness
-brightness = st.sidebar.slider("Brightness", 0.0, 2.0, 1.0, 0.1)
-
-# Tint options
-tint_color = st.sidebar.color_picker("Tint Color", "#ffffff")
-tint_color_rgb = tuple(int(tint_color[i:i+2], 16) for i in (1, 3, 5))
-tint_opacity = st.sidebar.slider("Tint Opacity", 0.0, 1.0, 0.0, 0.05)
-
-# Display thumbnails in column
+# ────────────────────────────── MAIN PAGE ──────────────────────────────
 st.title("Custom Image Augmentation Tool")
-sample_images = get_sample_images()
 
-if sample_images:
-    selected_sample = st.session_state.get("selected_sample", sample_images[0])
+# Upload section
+st.markdown("### Upload Images")
+uploaded = st.file_uploader("Upload image or zip", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
+if uploaded:
+    for item in uploaded:
+        if item.name.endswith(".zip"):
+            with zipfile.ZipFile(item, 'r') as zip_ref:
+                zip_ref.extractall(INPUT_FOLDER)
+        else:
+            with open(os.path.join(INPUT_FOLDER, item.name), "wb") as f:
+                f.write(item.read())
+
+# Display sample images for preview
+sample_images = list_images(SAMPLE_FOLDER)
+overlay_images = [os.path.join(OVERLAY_FOLDER, f) for f in list_images(OVERLAY_FOLDER)]
+input_images = [os.path.join(INPUT_FOLDER, f) for f in list_images(INPUT_FOLDER)]
+
+if input_images:
+    selected_img_name = st.selectbox("Choose an image to preview from uploaded", [os.path.basename(path) for path in input_images])
+    selected_img_path = os.path.join(INPUT_FOLDER, selected_img_name)
+
+    st.markdown("---")
+    st.markdown("### Sample Images")
 
     col1, col2 = st.columns([1, 3])
     with col1:
-        st.subheader("Sample Images")
-        for img_path in sample_images:
-            img = Image.open(img_path)
-            if st.button("", key=img_path):
-                st.session_state.selected_sample = img_path
-            st.image(img.resize((150, 150)), use_container_width=False, caption=os.path.basename(img_path),
-                     channels="RGB", output_format="JPEG")
+        for img_file in sample_images:
+            img_path = os.path.join(SAMPLE_FOLDER, img_file)
+            thumbnail = Image.open(img_path).resize((100, 100))
+            if st.button(img_file, key=img_file):
+                selected_img_path = img_path
+            st.image(thumbnail, caption=img_file, use_container_width=True)
 
     with col2:
-        selected_sample = st.session_state.get("selected_sample", sample_images[0])
-        try:
-            img = Image.open(selected_sample)
-            augmented_img = augment_image(img, selected_overlay_files, overlay_opacity, brightness, tint_color_rgb, tint_opacity)
-            st.image(augmented_img, caption="Augmented Image Preview", use_container_width=True)
+        st.markdown("### Augmented Preview")
+        preview_img = apply_augmentation(Image.open(selected_img_path), overlay_images, apply_blur, brightness_levels[0] if brightness_levels else None, tint_options[0] if tint_options else None)
+        st.image(preview_img, caption="Augmented Image", use_container_width=True)
 
-            # Save button
-            save_path = os.path.join(OUTPUT_DIR, f"augmented_{os.path.basename(selected_sample)}")
-            augmented_img.save(save_path)
-            with open(save_path, "rb") as f:
-                img_bytes = f.read()
-            st.download_button(label="Download Augmented Image", data=img_bytes, file_name=os.path.basename(save_path), mime="image/jpeg")
-        except Exception as e:
-            st.error(f"Error augmenting image: {e}")
+    # Process and save
+    if st.button("Run Augmentation"):
+        total = 0
+        for img_path in input_images:
+            total += save_augmented_images(img_path, overlay_images, [apply_blur], brightness_levels, tint_options)
+        st.success(f"Saved {total} augmented images in '{OUTPUT_FOLDER}' folder.")
 else:
-    st.info("Please upload sample images to begin.")
+    st.info("Please upload images to begin.")
