@@ -26,8 +26,8 @@ def apply_gaussian_blur(img, k=7):
     k = k if k % 2 == 1 else k+1
     return cv2.GaussianBlur(img, (k,k), 0)
 
-def apply_random_occlusion(img): return img  # stub
-def apply_perspective_transform(i): return i  # stub
+def apply_random_occlusion(img):   return img  # stub
+def apply_perspective_transform(i):return i    # stub
 
 def apply_overlay(base, overlay, alpha=0.3):
     ov = cv2.resize(overlay,(base.shape[1],base.shape[0]))
@@ -102,20 +102,33 @@ if sample_files:
 
     img_prev = preview_img.copy()
 
-    img_col, slider_col = st.columns([2, 1], gap="large")
+    img_col, spacer_col, slider_col = st.columns([2, 0.1, 1])
     with slider_col:
         st.markdown("#### 🔧 Preview Controls")
-        tint_preview = st.slider("Tint Opacity", 0.0, 1.0, 0.25, step=0.05)
-        overlay_alpha = st.slider("Overlay Opacity", 0.0, 1.0, 0.3, step=0.05)
         shadow_strength = st.slider("Shadow Strength", 0.0, 1.0, 0.45, step=0.05)
         reflection_intensity = st.slider("Reflection Intensity", 0.0, 1.0, 0.12, step=0.02)
         blur_strength = st.slider("Blur Kernel (odd)", 1, 15, 7, step=2)
 
-    if tint_opts:
-        img_prev = apply_tint(img_prev, tint_vals[tint_opts[0]], tint_preview)
-    if overlay_imgs:
-        ov_img = overlay_imgs[0][1]
-        img_prev = apply_overlay(img_prev, ov_img, alpha=overlay_alpha)
+        # Tint controls
+        enabled_tints = []
+        for tint in tint_opts:
+            enable = st.checkbox(f"Enable {tint}", value=True, key=f"tint_en_{tint}")
+            if enable:
+                opacity = st.slider(f"{tint} Opacity", 0.0, 1.0, 0.25, step=0.05, key=f"tint_op_{tint}")
+                enabled_tints.append((tint, opacity))
+
+        # Overlay controls
+        enabled_overlays = []
+        for name, img in overlay_imgs:
+            enable = st.checkbox(f"Enable Overlay: {name}", value=True, key=f"ov_en_{name}")
+            if enable:
+                ov_alpha = st.slider(f"{name} Opacity", 0.0, 1.0, 0.3, step=0.05, key=f"ov_op_{name}")
+                enabled_overlays.append((img, ov_alpha))
+
+    for tint, alpha in enabled_tints:
+        img_prev = apply_tint(img_prev, tint_vals[tint], alpha)
+    for ov_img, ov_alpha in enabled_overlays:
+        img_prev = apply_overlay(img_prev, ov_img, ov_alpha)
     if "Shadow" in augmentations:
         img_prev = apply_shadow(img_prev, shadow_strength)
     if "Reflection" in augmentations:
@@ -152,17 +165,9 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                 for b in (brightness_opts or ["original"]):
                     img_b = img if b=="original" else np.clip(img*brightness_vals[b],0,255).astype(np.uint8)
                     for t in (tint_opts or ["original"]):
-                        img_bt = img_b if t=="original" else apply_tint(img_b, tint_vals[t], tint_preview)
+                        img_bt = img_b if t=="original" else apply_tint(img_b, tint_vals[t])
                         for ov_name, ov_img in (overlay_imgs or [("orig", None)]):
-                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img, alpha=overlay_alpha)
-
-                            img_final = img_bto.copy()
-                            if "Shadow" in augmentations:
-                                img_final = apply_shadow(img_final, shadow_strength)
-                            if "Reflection" in augmentations:
-                                img_final = apply_glass_reflection(img_final, reflection_intensity)
-                            if "Blur" in augmentations:
-                                img_final = apply_gaussian_blur(img_final, blur_strength)
+                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img)
 
                             suffix = "_".join([s for s in [b,t] if s!="original"])
                             if ov_img is not None:
@@ -172,17 +177,17 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                             if augmentations:
                                 for aug in augmentations:
                                     func = {
-                                        "Shadow":lambda x: apply_shadow(x, shadow_strength),
-                                        "Reflection":lambda x: apply_glass_reflection(x, reflection_intensity),
-                                        "Blur":lambda x: apply_gaussian_blur(x, blur_strength),
+                                        "Shadow":apply_shadow,
+                                        "Reflection":apply_glass_reflection,
+                                        "Blur":apply_gaussian_blur,
                                         "Occlusion":apply_random_occlusion,
                                         "Perspective":apply_perspective_transform
                                     }[aug]
-                                    path = save_aug(img_final, func, base, f"{suffix}_{aug.lower()}", out_dir)
+                                    path = save_aug(img_bto, func, base, f"{suffix}_{aug.lower()}", out_dir)
                                     output_files.append(path)
                             else:
                                 path = os.path.join(out_dir, f"{base}_{suffix}.jpg")
-                                cv2.imwrite(path, cv2.cvtColor(img_final, cv2.COLOR_RGB2BGR))
+                                cv2.imwrite(path, cv2.cvtColor(img_bto, cv2.COLOR_RGB2BGR))
                                 output_files.append(path)
 
             st.success("✅ Done")
