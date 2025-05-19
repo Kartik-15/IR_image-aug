@@ -87,7 +87,7 @@ for f in ov_uploads:
     overlay_imgs.append((os.path.splitext(f.name)[0], img))
 
 # ──────────────────────────────────
-# Live Preview Section with toggles on right
+# Live Preview Section
 # ──────────────────────────────────
 st.markdown("---")
 st.header("🔍 Live Preview (Sample Image)")
@@ -123,11 +123,11 @@ if sample_files:
             enable = st.checkbox(f"Enable Overlay: {name}", value=True, key=f"ov_en_{name}")
             if enable:
                 ov_alpha = st.slider(f"{name} Opacity", 0.0, 1.0, 0.3, step=0.05, key=f"ov_op_{name}")
-                enabled_overlays.append((img, ov_alpha))
+                enabled_overlays.append((name, img, ov_alpha))
 
     for tint, alpha in enabled_tints:
         img_prev = apply_tint(img_prev, tint_vals[tint], alpha)
-    for ov_img, ov_alpha in enabled_overlays:
+    for _, ov_img, ov_alpha in enabled_overlays:
         img_prev = apply_overlay(img_prev, ov_img, ov_alpha)
     if "Shadow" in augmentations:
         img_prev = apply_shadow(img_prev, shadow_strength)
@@ -164,38 +164,31 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
 
                 for b in (brightness_opts or ["original"]):
                     img_b = img if b=="original" else np.clip(img*brightness_vals[b],0,255).astype(np.uint8)
+                    for t, t_alpha in (enabled_tints or [("original", None)]):
+                        img_bt = img_b if t=="original" else apply_tint(img_b, tint_vals[t], t_alpha)
+                        for ov_name, ov_img, ov_alpha in (enabled_overlays or [("orig", None, None)]):
+                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img, ov_alpha)
 
-                    img_bt = img_b.copy()
-                    for tint, alpha in enabled_tints:
-                        img_bt = apply_tint(img_bt, tint_vals[tint], alpha)
+                            suffix = "_".join([s for s in [b,t] if s!="original"])
+                            if ov_img is not None:
+                                suffix += f"_ov_{ov_name}"
+                            suffix = suffix or "original"
 
-                    img_bto = img_bt.copy()
-                    for ov_img, ov_alpha in enabled_overlays:
-                        img_bto = apply_overlay(img_bto, ov_img, ov_alpha)
-
-                    suffix = "_".join([s for s in [b] if s!="original"])
-                    if enabled_tints:
-                        suffix += "_" + "_".join([t for t, _ in enabled_tints])
-                    if enabled_overlays:
-                        suffix += "_" + "_".join([f"ov_{i}" for i, _ in enumerate(enabled_overlays)])
-
-                    suffix = suffix or "original"
-
-                    if augmentations:
-                        for aug in augmentations:
-                            func = {
-                                "Shadow": lambda im: apply_shadow(im, shadow_strength),
-                                "Reflection": lambda im: apply_glass_reflection(im, reflection_intensity),
-                                "Blur": lambda im: apply_gaussian_blur(im, blur_strength),
-                                "Occlusion": apply_random_occlusion,
-                                "Perspective": apply_perspective_transform
-                            }[aug]
-                            path = save_aug(img_bto, func, base, f"{suffix}_{aug.lower()}", out_dir)
-                            output_files.append(path)
-                    else:
-                        path = os.path.join(out_dir, f"{base}_{suffix}.jpg")
-                        cv2.imwrite(path, cv2.cvtColor(img_bto, cv2.COLOR_RGB2BGR))
-                        output_files.append(path)
+                            if augmentations:
+                                for aug in augmentations:
+                                    func = {
+                                        "Shadow": lambda x: apply_shadow(x, shadow_strength),
+                                        "Reflection": lambda x: apply_glass_reflection(x, reflection_intensity),
+                                        "Blur": lambda x: apply_gaussian_blur(x, blur_strength),
+                                        "Occlusion": apply_random_occlusion,
+                                        "Perspective": apply_perspective_transform
+                                    }[aug]
+                                    path = save_aug(img_bto, func, base, f"{suffix}_{aug.lower()}", out_dir)
+                                    output_files.append(path)
+                            else:
+                                path = os.path.join(out_dir, f"{base}_{suffix}.jpg")
+                                cv2.imwrite(path, cv2.cvtColor(img_bto, cv2.COLOR_RGB2BGR))
+                                output_files.append(path)
 
             st.success("✅ Done")
             st.markdown(f"**Total images created: {len(output_files)}**")
