@@ -1,0 +1,8 @@
+[theme]
+base="dark"  # or "light", if your app uses a dark theme
+
+[server]
+enableXsrfProtection = false
+
+[client]
+showSidebarNavigation = false
