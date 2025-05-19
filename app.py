@@ -164,31 +164,38 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
 
                 for b in (brightness_opts or ["original"]):
                     img_b = img if b=="original" else np.clip(img*brightness_vals[b],0,255).astype(np.uint8)
-                    for t in (tint_opts or ["original"]):
-                        img_bt = img_b if t=="original" else apply_tint(img_b, tint_vals[t])
-                        for ov_name, ov_img in (overlay_imgs or [("orig", None)]):
-                            img_bto = img_bt if ov_img is None else apply_overlay(img_bt, ov_img)
 
-                            suffix = "_".join([s for s in [b,t] if s!="original"])
-                            if ov_img is not None:
-                                suffix += f"_ov_{ov_name}"
-                            suffix = suffix or "original"
+                    img_bt = img_b.copy()
+                    for tint, alpha in enabled_tints:
+                        img_bt = apply_tint(img_bt, tint_vals[tint], alpha)
 
-                            if augmentations:
-                                for aug in augmentations:
-                                    func = {
-                                        "Shadow":apply_shadow,
-                                        "Reflection":apply_glass_reflection,
-                                        "Blur":apply_gaussian_blur,
-                                        "Occlusion":apply_random_occlusion,
-                                        "Perspective":apply_perspective_transform
-                                    }[aug]
-                                    path = save_aug(img_bto, func, base, f"{suffix}_{aug.lower()}", out_dir)
-                                    output_files.append(path)
-                            else:
-                                path = os.path.join(out_dir, f"{base}_{suffix}.jpg")
-                                cv2.imwrite(path, cv2.cvtColor(img_bto, cv2.COLOR_RGB2BGR))
-                                output_files.append(path)
+                    img_bto = img_bt.copy()
+                    for ov_img, ov_alpha in enabled_overlays:
+                        img_bto = apply_overlay(img_bto, ov_img, ov_alpha)
+
+                    suffix = "_".join([s for s in [b] if s!="original"])
+                    if enabled_tints:
+                        suffix += "_" + "_".join([t for t, _ in enabled_tints])
+                    if enabled_overlays:
+                        suffix += "_" + "_".join([f"ov_{i}" for i, _ in enumerate(enabled_overlays)])
+
+                    suffix = suffix or "original"
+
+                    if augmentations:
+                        for aug in augmentations:
+                            func = {
+                                "Shadow": lambda im: apply_shadow(im, shadow_strength),
+                                "Reflection": lambda im: apply_glass_reflection(im, reflection_intensity),
+                                "Blur": lambda im: apply_gaussian_blur(im, blur_strength),
+                                "Occlusion": apply_random_occlusion,
+                                "Perspective": apply_perspective_transform
+                            }[aug]
+                            path = save_aug(img_bto, func, base, f"{suffix}_{aug.lower()}", out_dir)
+                            output_files.append(path)
+                    else:
+                        path = os.path.join(out_dir, f"{base}_{suffix}.jpg")
+                        cv2.imwrite(path, cv2.cvtColor(img_bto, cv2.COLOR_RGB2BGR))
+                        output_files.append(path)
 
             st.success("✅ Done")
             st.markdown(f"**Total images created: {len(output_files)}**")
