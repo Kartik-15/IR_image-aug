@@ -109,8 +109,12 @@ def process_single_file(filepath, brightness_opts_local, enabled_tints, enabled_
     gc.collect()
     return written, errors
 
-# ── Cached ZIP reader: reads once per unique path, avoids re-reading every rerun
-@st.cache_data(show_spinner=False)
+# Max images per ZIP batch — keeps each ZIP under ~150 MB on Cloud
+ZIP_BATCH_SIZE = 300
+
+# Cached ZIP reader: max_entries=2 caps memory to ~2 × batch size at once.
+# Only one batch is typically shown at a time, so the LRU evicts stale ones.
+@st.cache_data(show_spinner=False, max_entries=2)
 def _read_zip(path: str) -> bytes:
     with open(path, "rb") as f:
         return f.read()
@@ -219,16 +223,20 @@ def get_enabled_overlays():
 st.markdown("---")
 if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
 
-    # Estimate output count so users can spot large batches before starting
-    _et = get_enabled_tints()
-    _eo = get_enabled_overlays()
-    est = len(up_files) * max(1, len(brightness_opts)) * max(1, len(_et)) \
-        * max(1, len(_eo)) * max(1, len(augmentations))
-    if est > 300:
-        st.warning(f"⚠️ Estimated **{est}** output images. Consider reducing filter combinations "
-                   f"to stay under Streamlit Cloud's memory limit.")
+    # Estimate output count before the user hits Process
+    _et  = get_enabled_tints()
+    _eo  = get_enabled_overlays()
+    est  = len(up_files) * max(1, len(brightness_opts)) * max(1, len(_et)) \
+         * max(1, len(_eo)) * max(1, len(augmentations))
+    n_batches = max(1, -(-est // ZIP_BATCH_SIZE))  # ceiling division
+    if est > ZIP_BATCH_SIZE:
+        st.info(
+            f"Estimated **{est}** output images — will be split into "
+            f"**{n_batches} ZIP batches** of {ZIP_BATCH_SIZE} images each. "
+            f"You can download each batch separately after processing."
+        )
     else:
-        st.info(f"Estimated output images: **{est}**")
+        st.info(f"Estimated output images: **{est}** — single ZIP download.")
 
     if st.button("✅ Process Images"):
         enabled_tints   = get_enabled_tints()
@@ -240,24 +248,32 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
 
         with tempfile.TemporaryDirectory() as inp_dir, tempfile.TemporaryDirectory() as out_dir:
             for f in up_files:
-                f.seek(0)  # reset in case file was read in a previous run
+                f.seek(0)  # reset position in case of re-processing
                 if f.name.lower().endswith(".zip"):
+                    # Extract each zip into its own subdirectory so that
+                    # individual images uploaded alongside a zip never collide
+                    # with files inside the zip.
+                    subdir = os.path.join(inp_dir, os.path.splitext(f.name)[0])
+                    os.makedirs(subdir, exist_ok=True)
                     tmpzip = os.path.join(inp_dir, f.name)
                     with open(tmpzip, "wb") as zf:
                         zf.write(f.read())
                     try:
                         with zipfile.ZipFile(tmpzip, "r") as z:
-                            z.extractall(inp_dir)
+                            z.extractall(subdir)
                     except zipfile.BadZipFile:
                         st.error(f"Corrupted zip: {f.name} — skipping.")
                 else:
                     with open(os.path.join(inp_dir, f.name), "wb") as out_f:
                         out_f.write(f.read())
 
-            all_input_files = [
-                os.path.join(inp_dir, p) for p in os.listdir(inp_dir)
-                if p.lower().endswith((".jpg", ".jpeg", ".png"))
-            ]
+            # Walk the whole tree so images inside zip subdirectories are found
+            all_input_files = sorted(
+                os.path.join(root, fname)
+                for root, _, files in os.walk(inp_dir)
+                for fname in files
+                if fname.lower().endswith((".jpg", ".jpeg", ".png"))
+            )
             total_inputs = len(all_input_files)
 
             if total_inputs == 0:
@@ -305,56 +321,96 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                 if not output_files:
                     st.warning("No output images were created.")
                 else:
-                    # Write ZIP directly to a named temp file on disk — this avoids
-                    # loading the entire ZIP into RAM twice (BytesIO + .getvalue() copy).
-                    # Only the path is stored in session_state; bytes are loaded from
-                    # disk once per download via @st.cache_data.
-                    old_path = st.session_state.pop("zip_path", None)
-                    if old_path and os.path.exists(old_path):
-                        try:
-                            os.unlink(old_path)
-                            _read_zip.clear()
-                        except OSError:
-                            pass
+                    # Clean up any ZIPs from a previous run before writing new ones
+                    for old in st.session_state.pop("zip_paths", []):
+                        if old and os.path.exists(old):
+                            try:
+                                os.unlink(old)
+                            except OSError:
+                                pass
+                    _read_zip.clear()
 
-                    zip_fd, zip_path = tempfile.mkstemp(suffix=".zip", prefix="aug_")
-                    os.close(zip_fd)
-                    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as z:
-                        for fp in output_files:
-                            z.write(fp, os.path.basename(fp))
+                    # Split output files into ZIP_BATCH_SIZE chunks and write each
+                    # directly to a named temp file on disk — avoids loading the
+                    # full batch into RAM as a BytesIO buffer.
+                    chunks = [output_files[i:i + ZIP_BATCH_SIZE]
+                              for i in range(0, len(output_files), ZIP_BATCH_SIZE)]
+                    new_zip_paths = []
+                    for chunk in chunks:
+                        zip_fd, zip_path = tempfile.mkstemp(suffix=".zip", prefix="aug_")
+                        os.close(zip_fd)
+                        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as z:
+                            for fp in chunk:
+                                z.write(fp, os.path.basename(fp))
+                        new_zip_paths.append(zip_path)
 
-                    st.session_state["zip_path"]    = zip_path
+                    st.session_state["zip_paths"]    = new_zip_paths
                     st.session_state["output_count"] = total_written
                     gc.collect()
 
-    # Download section — renders in the same script run as processing completes,
-    # so no st.rerun() is needed. Also re-renders on every subsequent rerun as
-    # long as the ZIP file still exists on disk.
-    zip_path = st.session_state.get("zip_path")
-    if zip_path and os.path.exists(zip_path):
-        st.success(f"✅ {st.session_state.get('output_count', '?')} images generated — ready to download.")
-        col_dl, col_clr = st.columns([3, 1])
-        with col_dl:
-            # _read_zip is cached by path, so the disk read only happens once
-            # even across multiple reruns caused by widget interactions.
-            st.download_button(
-                "⬇️ Download ZIP",
-                data=_read_zip(zip_path),
-                file_name="augmented_images.zip",
-                mime="application/zip",
-                key="dl_zip",
-            )
-        with col_clr:
-            if st.button("🗑️ Clear", key="clear_results"):
-                old = st.session_state.pop("zip_path", None)
-                if old and os.path.exists(old):
+    # ── Download section ────────────────────────────────────────────────────
+    # Renders in the same script run as processing completes (no st.rerun
+    # needed) and persists across widget-triggered reruns via session_state.
+    zip_paths   = st.session_state.get("zip_paths", [])
+    valid_paths = [p for p in zip_paths if os.path.exists(p)]
+
+    if valid_paths:
+        n     = len(valid_paths)
+        count = st.session_state.get("output_count", "?")
+
+        def _clear_results():
+            for p in st.session_state.pop("zip_paths", []):
+                if p and os.path.exists(p):
                     try:
-                        os.unlink(old)
-                        _read_zip.clear()
+                        os.unlink(p)
                     except OSError:
                         pass
-                st.session_state.pop("output_count", None)
-                st.rerun()
+            _read_zip.clear()
+            st.session_state.pop("output_count", None)
+
+        if n == 1:
+            st.success(f"✅ {count} images generated — ready to download.")
+            col_dl, col_clr = st.columns([3, 1])
+            with col_dl:
+                st.download_button(
+                    "⬇️ Download ZIP",
+                    data=_read_zip(valid_paths[0]),
+                    file_name="augmented_images.zip",
+                    mime="application/zip",
+                    key="dl_zip_single",
+                )
+            with col_clr:
+                if st.button("🗑️ Clear", key="clear_results"):
+                    _clear_results()
+                    st.rerun()
+        else:
+            st.success(
+                f"✅ {count} images generated — split into **{n} ZIP batches** "
+                f"of up to {ZIP_BATCH_SIZE} images each."
+            )
+            # Only one batch is loaded into memory at a time.
+            # _read_zip caches the last 2 selections (max_entries=2) so
+            # switching back to a previous batch is instant.
+            labels = [f"Part {i + 1} of {n}" for i in range(n)]
+            sel_idx = st.selectbox(
+                "Select batch to download:",
+                range(n),
+                format_func=lambda i: labels[i],
+                key="zip_batch_select",
+            )
+            col_dl, col_clr = st.columns([3, 1])
+            with col_dl:
+                st.download_button(
+                    f"⬇️ Download Part {sel_idx + 1} of {n}",
+                    data=_read_zip(valid_paths[sel_idx]),
+                    file_name=f"augmented_part{sel_idx + 1}_of_{n}.zip",
+                    mime="application/zip",
+                    key=f"dl_zip_part_{sel_idx}",
+                )
+            with col_clr:
+                if st.button("🗑️ Clear all", key="clear_results"):
+                    _clear_results()
+                    st.rerun()
 
 elif up_files:
     st.warning("Select at least one transformation or overlay.")
