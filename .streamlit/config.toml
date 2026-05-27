@@ -1,8 +1,13 @@
 [theme]
-base="dark"  # or "light", if your app uses a dark theme
+base = "dark"
 
 [server]
 enableXsrfProtection = false
+maxUploadSize = 500
+enableStaticServing = false
 
 [client]
 showSidebarNavigation = false
+
+[runner]
+fastReruns = true
