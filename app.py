@@ -1,5 +1,5 @@
 import streamlit as st
-import cv2, numpy as np, os, glob, zipfile, tempfile, gc
+import cv2, numpy as np, os, glob, zipfile, tempfile, gc, math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -109,11 +109,18 @@ def process_single_file(filepath, brightness_opts_local, enabled_tints, enabled_
     gc.collect()
     return written, errors
 
-# Max images per ZIP batch — keeps each ZIP under ~150 MB on Cloud
-ZIP_BATCH_SIZE = 300
+# Target maximum MB per ZIP part (ZIP_STORED ≈ raw file size, so this is accurate)
+MAX_ZIP_MB    = 150
+MAX_ZIP_BYTES = MAX_ZIP_MB * 1024 * 1024
+
+def _fmt_size(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 ** 2:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / 1024 ** 2:.1f} MB"
 
 # Cached ZIP reader: max_entries=2 caps memory to ~2 × batch size at once.
-# Only one batch is typically shown at a time, so the LRU evicts stale ones.
 @st.cache_data(show_spinner=False, max_entries=2)
 def _read_zip(path: str) -> bytes:
     with open(path, "rb") as f:
@@ -223,20 +230,23 @@ def get_enabled_overlays():
 st.markdown("---")
 if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
 
-    # Estimate output count before the user hits Process
+    # Estimate output count and size before the user hits Process
     _et  = get_enabled_tints()
     _eo  = get_enabled_overlays()
     est  = len(up_files) * max(1, len(brightness_opts)) * max(1, len(_et)) \
          * max(1, len(_eo)) * max(1, len(augmentations))
-    n_batches = max(1, -(-est // ZIP_BATCH_SIZE))  # ceiling division
-    if est > ZIP_BATCH_SIZE:
+    avg_input_bytes  = sum(getattr(f, "size", 0) for f in up_files) / max(1, len(up_files))
+    est_total_bytes  = est * avg_input_bytes
+    est_total_mb     = est_total_bytes / (1024 ** 2)
+    n_batches        = max(1, math.ceil(est_total_bytes / MAX_ZIP_BYTES))
+    if n_batches > 1:
         st.info(
-            f"Estimated **{est}** output images — will be split into "
-            f"**{n_batches} ZIP batches** of {ZIP_BATCH_SIZE} images each. "
-            f"You can download each batch separately after processing."
+            f"Estimated **{est}** output images (~{est_total_mb:.0f} MB) — "
+            f"will be split into **{n_batches} ZIP parts** of up to {MAX_ZIP_MB} MB each. "
+            f"You can download each part separately after processing."
         )
     else:
-        st.info(f"Estimated output images: **{est}** — single ZIP download.")
+        st.info(f"Estimated output: **{est}** images (~{est_total_mb:.0f} MB) — single ZIP download.")
 
     if st.button("✅ Process Images"):
         enabled_tints   = get_enabled_tints()
@@ -330,12 +340,15 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                                 pass
                     _read_zip.clear()
 
-                    # Split output files into ZIP_BATCH_SIZE chunks and write each
-                    # directly to a named temp file on disk — avoids loading the
-                    # full batch into RAM as a BytesIO buffer.
-                    chunks = [output_files[i:i + ZIP_BATCH_SIZE]
-                              for i in range(0, len(output_files), ZIP_BATCH_SIZE)]
-                    new_zip_paths = []
+                    # Split by size so each ZIP stays under MAX_ZIP_MB.
+                    # ZIP_STORED means zip size ≈ sum of raw file sizes.
+                    total_out_bytes = sum(os.path.getsize(fp) for fp in output_files)
+                    n_chunks   = max(1, math.ceil(total_out_bytes / MAX_ZIP_BYTES))
+                    chunk_size = math.ceil(len(output_files) / n_chunks)
+                    chunks = [output_files[i:i + chunk_size]
+                              for i in range(0, len(output_files), chunk_size)]
+
+                    new_zip_paths, new_zip_sizes = [], []
                     for chunk in chunks:
                         zip_fd, zip_path = tempfile.mkstemp(suffix=".zip", prefix="aug_")
                         os.close(zip_fd)
@@ -343,19 +356,25 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                             for fp in chunk:
                                 z.write(fp, os.path.basename(fp))
                         new_zip_paths.append(zip_path)
+                        new_zip_sizes.append(os.path.getsize(zip_path))
 
                     st.session_state["zip_paths"]    = new_zip_paths
+                    st.session_state["zip_sizes"]    = new_zip_sizes
                     st.session_state["output_count"] = total_written
                     gc.collect()
 
     # ── Download section ────────────────────────────────────────────────────
     # Renders in the same script run as processing completes (no st.rerun
     # needed) and persists across widget-triggered reruns via session_state.
-    zip_paths   = st.session_state.get("zip_paths", [])
-    valid_paths = [p for p in zip_paths if os.path.exists(p)]
+    zip_paths  = st.session_state.get("zip_paths", [])
+    zip_sizes  = st.session_state.get("zip_sizes", [])
+    valid_pairs = [
+        (p, zip_sizes[i] if i < len(zip_sizes) else 0)
+        for i, p in enumerate(zip_paths) if os.path.exists(p)
+    ]
 
-    if valid_paths:
-        n     = len(valid_paths)
+    if valid_pairs:
+        n     = len(valid_pairs)
         count = st.session_state.get("output_count", "?")
 
         def _clear_results():
@@ -367,14 +386,16 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                         pass
             _read_zip.clear()
             st.session_state.pop("output_count", None)
+            st.session_state.pop("zip_sizes", None)
 
         if n == 1:
-            st.success(f"✅ {count} images generated — ready to download.")
+            p, sz = valid_pairs[0]
+            st.success(f"✅ {count} images generated — ready to download ({_fmt_size(sz)}).")
             col_dl, col_clr = st.columns([3, 1])
             with col_dl:
                 st.download_button(
-                    "⬇️ Download ZIP",
-                    data=_read_zip(valid_paths[0]),
+                    f"⬇️ Download ZIP  ({_fmt_size(sz)})",
+                    data=_read_zip(p),
                     file_name="augmented_images.zip",
                     mime="application/zip",
                     key="dl_zip_single",
@@ -384,25 +405,26 @@ if up_files and (augmentations or brightness_opts or tint_opts or overlay_imgs):
                     _clear_results()
                     st.rerun()
         else:
+            total_sz = sum(sz for _, sz in valid_pairs)
             st.success(
-                f"✅ {count} images generated — split into **{n} ZIP batches** "
-                f"of up to {ZIP_BATCH_SIZE} images each."
+                f"✅ {count} images generated (~{_fmt_size(total_sz)} total) — "
+                f"split into **{n} ZIP parts** of up to {MAX_ZIP_MB} MB each."
             )
-            # Only one batch is loaded into memory at a time.
-            # _read_zip caches the last 2 selections (max_entries=2) so
-            # switching back to a previous batch is instant.
-            labels = [f"Part {i + 1} of {n}" for i in range(n)]
+            # Only one part is loaded into memory at a time.
+            # _read_zip caches the last 2 selections (max_entries=2).
+            labels = [f"Part {i + 1} of {n}  ({_fmt_size(sz)})" for i, (_, sz) in enumerate(valid_pairs)]
             sel_idx = st.selectbox(
-                "Select batch to download:",
+                "Select part to download:",
                 range(n),
                 format_func=lambda i: labels[i],
                 key="zip_batch_select",
             )
+            sel_path, sel_sz = valid_pairs[sel_idx]
             col_dl, col_clr = st.columns([3, 1])
             with col_dl:
                 st.download_button(
-                    f"⬇️ Download Part {sel_idx + 1} of {n}",
-                    data=_read_zip(valid_paths[sel_idx]),
+                    f"⬇️ Download Part {sel_idx + 1} of {n}  ({_fmt_size(sel_sz)})",
+                    data=_read_zip(sel_path),
                     file_name=f"augmented_part{sel_idx + 1}_of_{n}.zip",
                     mime="application/zip",
                     key=f"dl_zip_part_{sel_idx}",
